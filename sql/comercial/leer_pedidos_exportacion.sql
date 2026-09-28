@@ -53,3 +53,15 @@ WHERE t.table_name = 'Tabla_Pedidos_Exportacion';
 SELECT *
 FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion`
 LIMIT 100;
+
+
+-- -----------------------------------------------------------------------------
+-- Paso 4: un pedido puntual — Documento_de_ventas = 1100165556
+-- El tipo de Documento_de_ventas no está confirmado (STRING o INT64): el CAST
+-- a STRING hace que el filtro funcione en ambos casos. Si es STRING y viene con
+-- ceros a la izquierda (formato SAP VBELN), no afecta: el valor ya tiene los
+-- 10 dígitos. Una vez confirmado el tipo en el paso 1, se puede quitar el CAST.
+-- -----------------------------------------------------------------------------
+SELECT *
+FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion`
+WHERE CAST(Documento_de_ventas AS STRING) = '1100165556';
