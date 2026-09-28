@@ -1,6 +1,6 @@
 ---
 tags: [bigquery, sap, contexto-claude, cadena-suministros]
-updated: 2026-08-20
+updated: 2026-09-28
 ---
 
 # Mapa de datos BigQuery — Cadena de Suministros
@@ -149,9 +149,9 @@ Si no hay registro `MARM` con `MEINH='M3'`, cascada de fallback (orden confirmad
 > `volumen_solicitado_m3` en la base de causa raíz (`fillrate_etapa2`/`etapa3`/`etapa5`)
 > tiene una razón m³/unidad **~1000x inflada** en la mayoría de las filas de casi todos
 > los materiales — confirmado contra entregas reales SAP (pedido `23307055`/pos.`10`: razón
-> real 0,069 m³/unidad, no la que trae el campo). Ver `[[project_fillrate_etapa5_repaqueteo]]`
-> en memoria. **No usar `volumen_solicitado_m3` crudo para análisis de precisión sin
-> revisar este bug primero.**
+> real 0,069 m³/unidad, no la que trae el campo). Detalle en la nota de memoria local
+> `project_fillrate_etapa5_repaqueteo` (ver sección 8). **No usar `volumen_solicitado_m3`
+> crudo para análisis de precisión sin revisar este bug primero.**
 
 ### 3.3 Jerarquía de clasificación "Gescorp" (CABN/AUSP/CAWN/CAWNT)
 
@@ -208,7 +208,7 @@ Grupo de 4 clientes sujetos a control de fill rate, usado como filtro/segmento e
 3000337000, 3002650000, 3000061000, 3000006000
 ```
 (SODIMAC, IMPERIAL, CONSTRUMART, EASY RETAIL — metas de fill rate distintas por cliente,
-ver `[[project_...]]` en `fillrate_etapa3/CLAUDE.md`)
+ver `fillrate_etapa3/CLAUDE.md`)
 
 ### 3.6 Vigencia del pedido y `GWLDT` corrupto
 
@@ -229,8 +229,8 @@ Regla repetida en `fillrate_etapa2`, `fillrate_etapa3`, `ventas_cl`:
 
 `NETWR`/`MWSBP` (y cualquier campo monetario en CLP) vienen con **2 decimales de más**
 en SAP (comportamiento estándar para monedas sin decimales). Multiplicar por 100 para
-obtener el valor real. Verificado exacto en `log_gastotrans` (`2864.88 × 100 = 286.488`)
-y aplicado igual en `ventas_cl` (`VBAP.NETWR`).
+obtener el valor real. Verificado exacto en `log_gastotrans` (`2864.88 × 100 = 286488`
+CLP) y aplicado igual en `ventas_cl` (`VBAP.NETWR`).
 
 ### 3.8 Dominios de campo confirmados (no adivinar)
 
@@ -277,21 +277,21 @@ Looker Studio / Tableau o por otros scripts del repo:
 | Proyecto | Pregunta de negocio | Tablas SAP clave | Salida | `CLAUDE.md` |
 |---|---|---|---|---|
 | `fillrate_2026` | Fill rate histórico ZPN/CL11, backfill de stock diario | `vbak`/`vbap`, `mard`, `mseg_full`/`mkpf` | `Procesos_CDS.stock_diario_backfill`, `materiales_interes` | — (sin `CLAUDE.md` propio; lógica base para etapa2/3) |
-| `fillrate_etapa2` | Monitor forward-looking de cobertura stock vs. demanda, por Material | `vbak`/`vbap`, `mara`/`marm`/`mard`/`marc` | `llenado_capacidad.sql`, `detalle_pedidos_clientes.sql` (fuente Looker) | [[fillrate_etapa2/CLAUDE.md]] |
-| `fillrate_etapa3` | Causa raíz backward-looking de líneas incumplidas | + `stock_diario_backfill` | `fillrate_analityc2026_causa_raiz.sql` | [[fillrate_etapa3/CLAUDE.md]] |
-| `log_fillrate_etapa4` | ¿Cuánto del incumplimiento es bloqueo comercial/crédito, no falta de stock? | `CDHDR`/`CDPOS` (vía SE16N manual, no BQ) | `fillrate_causa_raiz_bloqueo_comercial.sql` | [[log_fillrate_etapa4/CLAUDE.md]] |
-| `log_fillrate_etapa5` | Efecto del repaqueteo sobre fill rate | Excel exportado (fuente SAP no reconstruida aún) | análisis Python | [[log_fillrate_etapa5/CLAUDE.md]] |
-| `prov_inventarios` | Provisión de deterioro (Daños/Obsoletos) vs. stock real por lote | `mchb`/`mcha`/`mch1`, `ckmlhd`/`ckmlcr` | `Procesos_CDS.prov_inventarios_monitor_dano/obsoletos` | [[prov_inventarios/CLAUDE.md]] |
-| `ventas_cl` | Detalle de ventas + ciclo completo (vigencia, crédito, despacho, factura, NC/devolución) | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbfa`/`vbrk`, `lips`, `mard` | `consulta_ventas_zpn_cl11.sql` | [[ventas_cl/CLAUDE.md]] |
-| `ventas_stocks_ventas` | Stock por Material×Ubicación para Tableau (sin demanda) | `mara`/`mard`/`marc`/`marm` | `stock_ventas.sql` | [[ventas_stocks_ventas/CLAUDE.md]] |
-| `gv_rechazos_cl` | Facturas rechazadas por cliente (folio fiscal, transporte) | `vbrp`/`vbrk`/`vbak`/`vbpa`, `vttp`/`vttk`, `zconfol` | `monitor_rechazos.sql` | [[gv_rechazos_cl/CLAUDE.md]] |
-| `control_embarques` | Control de embarques + "potencial de transporte marítimo" | `ZCL_SD_DUS1`, `zsd_t_export` | placeholder | [[control_embarques/CLAUDE.md]] |
-| `log_gastotrans` | Gasto de transporte por consolidador, HES a facturar | `vfkp`, `lfa1`, `ekko`/`ekpo` | `v_gasto_consolidador_ze18` | [[log_gastotrans/CLAUDE.md]] |
-| `plan_fillrate_carolayn` | Por definir | — | — | [[plan_fillrate_carolayn/CLAUDE.md]] |
+| `fillrate_etapa2` | Monitor forward-looking de cobertura stock vs. demanda, por Material | `vbak`/`vbap`, `mara`/`marm`/`mard`/`marc` | `llenado_capacidad.sql`, `detalle_pedidos_clientes.sql` (fuente Looker) | `fillrate_etapa2/CLAUDE.md` |
+| `fillrate_etapa3` | Causa raíz backward-looking de líneas incumplidas | + `stock_diario_backfill` | `fillrate_analityc2026_causa_raiz.sql` | `fillrate_etapa3/CLAUDE.md` |
+| `log_fillrate_etapa4` | ¿Cuánto del incumplimiento es bloqueo comercial/crédito, no falta de stock? | `CDHDR`/`CDPOS` (vía SE16N manual, no BQ) | `fillrate_causa_raiz_bloqueo_comercial.sql` | `log_fillrate_etapa4/CLAUDE.md` |
+| `log_fillrate_etapa5` | Efecto del repaqueteo sobre fill rate | Excel exportado (fuente SAP no reconstruida aún) | análisis Python | `log_fillrate_etapa5/CLAUDE.md` |
+| `prov_inventarios` | Provisión de deterioro (Daños/Obsoletos) vs. stock real por lote | `mchb`/`mcha`/`mch1`, `ckmlhd`/`ckmlcr` | `Procesos_CDS.prov_inventarios_monitor_dano/obsoletos` | `prov_inventarios/CLAUDE.md` |
+| `ventas_cl` | Detalle de ventas + ciclo completo (vigencia, crédito, despacho, factura, NC/devolución) | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbfa`/`vbrk`, `lips`, `mard` | `consulta_ventas_zpn_cl11.sql` | `ventas_cl/CLAUDE.md` |
+| `ventas_stocks_ventas` | Stock por Material×Ubicación para Tableau (sin demanda) | `mara`/`mard`/`marc`/`marm` | `stock_ventas.sql` | `ventas_stocks_ventas/CLAUDE.md` |
+| `gv_rechazos_cl` | Facturas rechazadas por cliente (folio fiscal, transporte) | `vbrp`/`vbrk`/`vbak`/`vbpa`, `vttp`/`vttk`, `zconfol` | `monitor_rechazos.sql` | `gv_rechazos_cl/CLAUDE.md` |
+| `control_embarques` | Control de embarques + "potencial de transporte marítimo" | `ZCL_SD_DUS1`, `zsd_t_export` | placeholder | `control_embarques/CLAUDE.md` |
+| `log_gastotrans` | Gasto de transporte por consolidador, HES a facturar | `vfkp`, `lfa1`, `ekko`/`ekpo` | `v_gasto_consolidador_ze18` | `log_gastotrans/CLAUDE.md` |
+| `plan_fillrate_carolayn` | Por definir | — | — | `plan_fillrate_carolayn/CLAUDE.md` |
 | `log_asignacion_optima` | Trazabilidad SAP, asignación óptima | `vttp`/`vttk` | dashboard HTML | sin `CLAUDE.md` propio |
 | `log_lotes_antiguos` | Antigüedad de lote (Excel/pandas) | `mchb` (Excel) | `lotes_antiguedad.xlsx` | origen de `prov_inventarios/lotes_almacenes_dano.sql` |
 | `log_fillrate_lotesabajo` | Fill rate desde exports Excel (`vbak`/`vbap`/`mara`/`marm`/`likp`/`lips`/`vttp`/`vttk`/`vekp`/`vepo`) | (Excel, no BQ directo) | — | sin `CLAUDE.md` propio |
-| `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver `[[project_lineas_activas]]`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
+| `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver nota de memoria `project_lineas_activas`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
 | `comex_facturacion` | Tiempo embarque→factura | `likp`/`vbfa`/`vbrk` (Excel) | `resultado_tiempo_embarque_factura.xlsx` | sin `CLAUDE.md` propio |
 | `papeles_hugo` | Exploratorio — origen de `sap_sd.t005t` | `t005t` | — | sin `CLAUDE.md` propio |
 
@@ -306,12 +306,18 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `mchb` sin confirmar | Asumida por patrón (mismo dataset que `mara`/`marm`/`mard`) | Verificar antes de correr `lotes_almacenes_dano.sql` |
 | `zsd_t_export` nombre sin confirmar 100% | Usado en queries de `control_embarques` | Confirmar contra catálogo real de `sap_sd` |
 
-## 8. Enlaces a memoria de Claude relacionada
+## 8. Notas de memoria local de Claude relacionadas
 
-- [[reference_bq_datasets_sap]] — mapa base dataset↔tabla (fuente de la sección 1)
-- [[project_lineas_activas]] — líneas de producción activas (`plan_planmolduras`)
-- [[project_fillrate_etapa5_repaqueteo]] — bug de `volumen_solicitado_m3` y análisis de repaqueteo
-- [[project_log_fillrate_etapa4_tableros_anexo]] — tableros ejecutivos de cumplimiento
+> [!note] No incluidas en este repositorio
+> Estas notas viven en la memoria local de Claude de la máquina donde se generó el
+> mapa, no en el repo. En una sesión nueva (p. ej. Claude Code en la web) no están
+> disponibles: si su contenido es necesario, copiarlo a este archivo o al `CLAUDE.md`
+> del subproyecto correspondiente.
+
+- `reference_bq_datasets_sap` — mapa base dataset↔tabla (fuente de la sección 1)
+- `project_lineas_activas` — líneas de producción activas (`plan_planmolduras`)
+- `project_fillrate_etapa5_repaqueteo` — bug de `volumen_solicitado_m3` y análisis de repaqueteo
+- `project_log_fillrate_etapa4_tableros_anexo` — tableros ejecutivos de cumplimiento
 
 ---
 
