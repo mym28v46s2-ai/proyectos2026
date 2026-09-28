@@ -8,7 +8,7 @@
 --   - Credito <> 'B'  -> igual a Ctd_Ped_m3.
 --   - Credito =  'B'  -> (bloqueo de crédito) cantidad de la posición en
 --     sap_sd.vbap (KWMENG, unidad VRKME) convertida a m3. Join por
---     Documento_de_ventas = VBELN y posición = POSNR.
+--     Documento_de_ventas = VBELN y Posicion_Ped_Venta = POSNR.
 --
 -- Conversión a M3 (MAPA_DATOS_BIGQUERY.md, sección 3.2):
 --   qty_base = KWMENG × UMREZ / UMREN        (MARM de la unidad de venta VRKME)
@@ -17,9 +17,6 @@
 --              (÷1 000 000) -> MARA.VOLUM/VOLEH
 --
 -- Supuestos a validar:
---   - La columna de posición de Tabla_Pedidos_Exportacion se llama `Posicion`
---     (ver CTE `pedidos`). Si se llama distinto, BigQuery devuelve
---     "Unrecognized name: Posicion": cambiar el nombre SOLO en ese CTE.
 --   - Validar contra SAP (VA03) un pedido bloqueado antes de usar en
 --     reportes: ver bug de volumen ~1000x en la sección 3.2 del mapa.
 -- =============================================================================
@@ -28,9 +25,9 @@ WITH
 pedidos AS (
   SELECT
     t.*,
-    LPAD(CAST(t.Documento_de_ventas AS STRING), 10, '0')  AS vbeln_join,
-    LPAD(CAST(t.Posicion            AS STRING),  6, '0')  AS posnr_join,   -- << columna de posición
-    UPPER(TRIM(CAST(t.Credito AS STRING))) = 'B'          AS es_bloqueo_credito
+    LPAD(CAST(t.Documento_de_ventas AS STRING), 10, '0')           AS vbeln_join,
+    LPAD(CAST(t.Posicion_Ped_Venta  AS STRING),  6, '0')           AS posnr_join,
+    COALESCE(UPPER(TRIM(CAST(t.Credito AS STRING))) = 'B', FALSE)  AS es_bloqueo_credito
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
 ),
 
