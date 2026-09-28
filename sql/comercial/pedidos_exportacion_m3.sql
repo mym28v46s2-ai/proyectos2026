@@ -5,9 +5,9 @@
 -- VBAK/VBAP.VBELN). Las columnas de Tabla_Pedidos_Exportacion (incluida
 -- Ctd_Ped_m3, que es a nivel pedido) se repiten en cada posición.
 --
--- Cta_ped_m3_b = m3 de la posición, calculado desde SAP para TODOS los
--- pedidos (no solo los que traen Ctd_Ped_m3 en 0), para poder contrastar
--- SUM(Cta_ped_m3_b) por pedido contra Ctd_Ped_m3 donde este sí viene.
+-- Cta_ped_m3_b = m3 de la posición (redondeado a 3 decimales), calculado desde
+-- SAP para TODOS los pedidos (no solo los que traen Ctd_Ped_m3 en 0), para poder
+-- contrastar SUM(Cta_ped_m3_b) por pedido contra Ctd_Ped_m3 donde este sí viene.
 --
 -- Conversión a M3 (MAPA_DATOS_BIGQUERY.md, sección 3.2):
 --   qty_base = KWMENG × UMREZ / UMREN        (MARM de la unidad de venta VRKME)
@@ -118,7 +118,7 @@ SELECT
   pm.kwmeng                AS Cantidad_pedido,
   pm.vrkme                 AS Unidad_venta,
   pm.abgru                 AS Motivo_rechazo,
-  pm.qty_m3                AS Cta_ped_m3_b,
+  ROUND(pm.qty_m3, 3)      AS Cta_ped_m3_b,
   CASE
     WHEN pm.vbeln IS NULL           THEN 'SIN_POSICIONES_VBAP'
     WHEN pm.qty_m3 IS NULL          THEN 'SIN_CONVERSION'
