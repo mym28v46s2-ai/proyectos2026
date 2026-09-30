@@ -1,0 +1,15 @@
+*.json
+.env
+*.key
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+__pycache__/
+.venv/
+venv/
+*.pyc
+.ipynb_checkpoints/
+~$*
+desktop.ini
+Thumbs.db
