@@ -28,6 +28,7 @@ updated: 2026-09-28
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
+| `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
 | `Procesos_CDS` | **Tablas de salida propias del repo** (no réplicas SAP) — resultado de los `CREATE OR REPLACE TABLE/VIEW` de los distintos proyectos | Ver catálogo completo en sección 5 |
 
 > [!warning] "Un dataset = un módulo SAP" es una trampa
@@ -277,6 +278,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | Proyecto | Pregunta de negocio | Tablas SAP clave | Salida | `CLAUDE.md` |
 |---|---|---|---|---|
 | `fillrate_2026` | Fill rate histórico ZPN/CL11, backfill de stock diario | `vbak`/`vbap`, `mard`, `mseg_full`/`mkpf` | `Procesos_CDS.stock_diario_backfill`, `materiales_interes` | — (sin `CLAUDE.md` propio; lógica base para etapa2/3) |
+| `comercial_exportaciones` | Pedidos de exportación con m3 recalculado desde `VBAP` cuando la posición está bloqueada por crédito (`Credito='B'`) | `Comercial.Tabla_Pedidos_Exportacion`, `vbap`, `marm`/`mara` | `pedidos_exportacion_m3_bloqueo.sql` (columnas `Cta_ped_m3_b`, `origen_m3_b`) | — (sin `CLAUDE.md` propio) |
 | `fillrate_etapa2` | Monitor forward-looking de cobertura stock vs. demanda, por Material | `vbak`/`vbap`, `mara`/`marm`/`mard`/`marc` | `llenado_capacidad.sql`, `detalle_pedidos_clientes.sql` (fuente Looker) | `fillrate_etapa2/CLAUDE.md` |
 | `fillrate_etapa3` | Causa raíz backward-looking de líneas incumplidas | + `stock_diario_backfill` | `fillrate_analityc2026_causa_raiz.sql` | `fillrate_etapa3/CLAUDE.md` |
 | `log_fillrate_etapa4` | ¿Cuánto del incumplimiento es bloqueo comercial/crédito, no falta de stock? | `CDHDR`/`CDPOS` (vía SE16N manual, no BQ) | `fillrate_causa_raiz_bloqueo_comercial.sql` | `log_fillrate_etapa4/CLAUDE.md` |
