@@ -2,7 +2,12 @@
 -- Tabla_Pedidos_Exportacion + Cta_ped_m3_b
 --
 -- Grano del resultado: el mismo de Tabla_Pedidos_Exportacion (1 fila por
--- posición del pedido de venta). No se agregan ni se quitan filas.
+-- posición del pedido de venta). No se agregan filas.
+--
+-- Filtro de período: solo posiciones con Fecha_Embarque_Comprometida desde
+-- hace 6 meses (fecha de hoy en Chile - 6 meses) en adelante, incluidas las
+-- fechas futuras. Las posiciones sin fecha (NULL o no interpretable) quedan
+-- fuera.
 --
 -- Cta_ped_m3_b (redondeado a 3 decimales):
 --   - Credito <> 'B'  -> igual a Ctd_Ped_m3.
@@ -22,6 +27,10 @@
 -- =============================================================================
 
 WITH
+parametros AS (
+  SELECT DATE_SUB(CURRENT_DATE('America/Santiago'), INTERVAL 6 MONTH) AS fecha_desde
+),
+
 pedidos AS (
   SELECT
     t.*,
@@ -29,6 +38,11 @@ pedidos AS (
     LPAD(CAST(t.Posicion_Ped_Venta  AS STRING),  6, '0')           AS posnr_join,
     COALESCE(UPPER(TRIM(CAST(t.Credito AS STRING))) = 'B', FALSE)  AS es_bloqueo_credito
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
+  -- Acepta DATE/DATETIME/TIMESTAMP, texto 'YYYY-MM-DD' o texto SAP 'YYYYMMDD'
+  WHERE COALESCE(
+          SAFE_CAST(t.Fecha_Embarque_Comprometida AS DATE),
+          SAFE.PARSE_DATE('%Y%m%d', CAST(t.Fecha_Embarque_Comprometida AS STRING))
+        ) >= (SELECT fecha_desde FROM parametros)
 ),
 
 -- Solo los pedidos con alguna posición bloqueada, para acotar la lectura de VBAP
