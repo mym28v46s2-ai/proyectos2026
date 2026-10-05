@@ -930,12 +930,12 @@ cumplimiento_cabecera AS (
 -- Universo: tableros (nivel_2_familia 'Aglomerado'/'MDF' y
 -- nivel_3_subfamilia 'Recubierto'/'Desnudo') vendidos en piezas
 -- (UM_Venta='ST') con paquete estándar en MARM (PAK, ver CTE 2B).
--- Regla (aplicada en el SELECT final): la posición es estándar si la
--- cantidad es múltiplo de las piezas por paquete (hacia arriba: 40 de
--- 20 = 2 paquetes) o divisor de ellas (hacia abajo: 10 de 20 = medio
--- paquete); si no, hay que armar un paquete especial -> repaqueteo
--- (ej. 7 de 20). Los restos se calculan aquí una sola vez; columnas
--- auxiliares, se excluyen del SELECT final.
+-- Regla (aplicada en el SELECT final): la posición es estándar solo si
+-- la cantidad es múltiplo exacto de las piezas por paquete (40 de 20 =
+-- 2 paquetes); si no, hay que armar un paquete especial -> repaqueteo
+-- (ej. 7 de 20, y también 10 de 20 = medio paquete). El resto se
+-- calcula aquí una sola vez; columna auxiliar, se excluye del SELECT
+-- final.
 -- ============================================================
 base_repaqueteo AS (
   SELECT
@@ -948,8 +948,7 @@ base_repaqueteo AS (
       AND Cantidad_Venta > 0,
       FALSE
     )                                                                   AS En_Universo_Repaqueteo,
-    MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete,
-    MOD(CAST(Unidades_por_Paquete AS NUMERIC), CAST(NULLIF(Cantidad_Venta, 0) AS NUMERIC)) AS Resto_Paquete_Cantidad
+    MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete
   FROM resultado_base
 )
 
@@ -958,7 +957,7 @@ base_repaqueteo AS (
 -- SELECT FINAL: agrega Segmento_Dias_Vigencia sobre resultado_base
 -- ============================================================
 SELECT
-  rb.* EXCEPT (En_Universo_Repaqueteo, Resto_Cantidad_Paquete, Resto_Paquete_Cantidad),
+  rb.* EXCEPT (En_Universo_Repaqueteo, Resto_Cantidad_Paquete),
   -- Ver CTE cumplimiento_cabecera.
   CASE
     WHEN cc.Unidades_Entregadas_Pedido = 0 AND cc.Fecha_Vigencia_Pedido >= CURRENT_DATE('America/Santiago')
@@ -1068,16 +1067,16 @@ SELECT
   IF(rb.En_Universo_Repaqueteo, 'S', 'N')                            AS Aplica_Repaqueteo,
   CASE
     WHEN NOT rb.En_Universo_Repaqueteo THEN NULL
-    WHEN rb.Resto_Cantidad_Paquete = 0 OR rb.Resto_Paquete_Cantidad = 0 THEN 'N'
+    WHEN rb.Resto_Cantidad_Paquete = 0 THEN 'N'
     ELSE 'S'
   END                                                                AS Es_Repaqueteo,
   IF(
-    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0 AND rb.Resto_Paquete_Cantidad != 0,
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
     CAST(TRUNC(CAST(rb.Cantidad_Venta AS NUMERIC) / rb.Unidades_por_Paquete) AS INT64),
     NULL
   )                                                                  AS Paquetes_Completos,
   IF(
-    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0 AND rb.Resto_Paquete_Cantidad != 0,
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
     rb.Resto_Cantidad_Paquete,
     NULL
   )                                                                  AS Piezas_Repaqueteo
