@@ -184,6 +184,21 @@ dimensiones AS (
 
 
 -- ============================================================
+-- CTE 2B: UNIDADES POR PAQUETE (MARM, MEINH='PAK')
+-- UMREZ del registro PAK = piezas por paquete estándar. Base de la
+-- metodología de repaqueteo (ver SELECT final).
+-- ============================================================
+unidades_paquete AS (
+  SELECT
+    MATNR,
+    MAX(UMREZ)                                              AS Unidades_por_Paquete
+  FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.marm`
+  WHERE MEINH = 'PAK'
+  GROUP BY MATNR
+),
+
+
+-- ============================================================
 -- CTE 3: CLASIFICACIÓN DE MATERIALES (SKU) — jerarquía Gescorp
 -- vía CABN/AUSP/CAWN/CAWNT, mismo patrón que fillrate_etapa2/
 -- sql/consultas/llenado_capacidad.sql
@@ -740,6 +755,8 @@ SELECT
 
   p.Cantidad_Venta,
   p.UM_Venta,
+  -- Piezas por paquete estándar (MARM.UMREZ con MEINH='PAK'). Ver CTE 2B.
+  up.Unidades_por_Paquete,
   -- M3 = cantidad en UM venta -> UM base (MARM) x volumen unitario
   -- (MARA), misma fórmula que llenado_capacidad.sql.
   ROUND(
@@ -863,6 +880,8 @@ LEFT JOIN descripciones_sku AS d6
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.marc` AS marc
   ON  marc.MATNR = p.Material
   AND marc.WERKS = 'TCDS'
+LEFT JOIN unidades_paquete AS up
+  ON up.MATNR = p.Material
 LEFT JOIN stock_disponible AS st
   ON st.Material = p.Material
 LEFT JOIN demanda_abierta_material AS dam
@@ -903,6 +922,35 @@ cumplimiento_cabecera AS (
     LOGICAL_OR(Categoria_Cumplimiento IN ('Cumplido con atraso', 'Atrasado en curso')) AS Tiene_Atraso_Pedido
   FROM resultado_base
   GROUP BY ID_Documento
+),
+
+
+-- ============================================================
+-- CTE 14B: BASE DE REPAQUETEO
+-- Universo: tableros (nivel_2_familia 'Aglomerado'/'MDF' y
+-- nivel_3_subfamilia 'Recubierto'/'Desnudo') vendidos en piezas
+-- (UM_Venta='ST') con paquete estándar en MARM (PAK, ver CTE 2B).
+-- Regla (aplicada en el SELECT final): la posición es estándar si la
+-- cantidad es múltiplo de las piezas por paquete (hacia arriba: 40 de
+-- 20 = 2 paquetes) o divisor de ellas (hacia abajo: 10 de 20 = medio
+-- paquete); si no, hay que armar un paquete especial -> repaqueteo
+-- (ej. 7 de 20). Los restos se calculan aquí una sola vez; columnas
+-- auxiliares, se excluyen del SELECT final.
+-- ============================================================
+base_repaqueteo AS (
+  SELECT
+    *,
+    COALESCE(
+      UPPER(TRIM(nivel_2_familia))    IN ('AGLOMERADO', 'MDF')
+      AND UPPER(TRIM(nivel_3_subfamilia)) IN ('RECUBIERTO', 'DESNUDO')
+      AND UM_Venta = 'ST'
+      AND Unidades_por_Paquete > 0
+      AND Cantidad_Venta > 0,
+      FALSE
+    )                                                                   AS En_Universo_Repaqueteo,
+    MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete,
+    MOD(CAST(Unidades_por_Paquete AS NUMERIC), CAST(NULLIF(Cantidad_Venta, 0) AS NUMERIC)) AS Resto_Paquete_Cantidad
+  FROM resultado_base
 )
 
 
@@ -910,7 +958,7 @@ cumplimiento_cabecera AS (
 -- SELECT FINAL: agrega Segmento_Dias_Vigencia sobre resultado_base
 -- ============================================================
 SELECT
-  rb.*,
+  rb.* EXCEPT (En_Universo_Repaqueteo, Resto_Cantidad_Paquete, Resto_Paquete_Cantidad),
   -- Ver CTE cumplimiento_cabecera.
   CASE
     WHEN cc.Unidades_Entregadas_Pedido = 0 AND cc.Fecha_Vigencia_Pedido >= CURRENT_DATE('America/Santiago')
@@ -1014,7 +1062,25 @@ SELECT
     WHEN (Stock_Centro_Abastecedor / M3_Demanda_Abierta_Centro_Zona) < 0.5
       THEN 'Sin stock total'
     ELSE 'Posicionado'
-  END                                                                AS Categoria_Posicionamiento_Stock
-FROM resultado_base AS rb
+  END                                                                AS Categoria_Posicionamiento_Stock,
+
+  -- Repaqueteo: ver CTE base_repaqueteo para el universo y la regla.
+  IF(rb.En_Universo_Repaqueteo, 'S', 'N')                            AS Aplica_Repaqueteo,
+  CASE
+    WHEN NOT rb.En_Universo_Repaqueteo THEN NULL
+    WHEN rb.Resto_Cantidad_Paquete = 0 OR rb.Resto_Paquete_Cantidad = 0 THEN 'N'
+    ELSE 'S'
+  END                                                                AS Es_Repaqueteo,
+  IF(
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0 AND rb.Resto_Paquete_Cantidad != 0,
+    CAST(TRUNC(CAST(rb.Cantidad_Venta AS NUMERIC) / rb.Unidades_por_Paquete) AS INT64),
+    NULL
+  )                                                                  AS Paquetes_Completos,
+  IF(
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0 AND rb.Resto_Paquete_Cantidad != 0,
+    rb.Resto_Cantidad_Paquete,
+    NULL
+  )                                                                  AS Piezas_Repaqueteo
+FROM base_repaqueteo AS rb
 LEFT JOIN cumplimiento_cabecera AS cc
   ON cc.ID_Documento = rb.ID_Documento
