@@ -24,7 +24,7 @@ updated: 2026-09-28
 | Dataset | Contenido | Notas |
 |---|---|---|
 | `cdc_produccion_pp_cp50_01_new` | Maestro de materiales y stock: `mara`, `makt`, `marc`, `marm`, `mard`, `mcha`, `mseg_full`, `mkpf`, `cabn`, `ausp`, `cawn`, `cawnt`. También `mchb` (asumida, aún sin confirmar) | El nombre "cp50_01" no es intuitivo — es el dataset "grande" de datos de producción/materiales |
-| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
+| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
@@ -67,6 +67,7 @@ updated: 2026-09-28
 | `vbep` | `sap_sd` | `VBELN`, `POSNR`, `ETENR`, `EDATU` | Líneas de programación — `ETENR` más bajo = "1era Fecha" (equiv. `RV45A-ETDAT`) |
 | `vbuk` | `sap_sd` | `VBELN`, `CMGST`, `WBSTK` | Estado de cabecera: status de crédito y estado de movimiento de mercancía |
 | `vbpa` | `sap_sd` | `VBELN`, `POSNR`, `PARVW`, `KUNNR` | Interlocutores. `PARVW='WE'`=destinatario mercadería, `'RE'`=responsable de factura (siempre a nivel cabecera, `POSNR='000000'`) |
+| `vbkd` | `sap_sd` | `VBELN`, `POSNR`, `BSTKD_E`, `INCO1` | Datos comerciales del pedido: OC del cliente por posición (fallback a cabecera `POSNR='000000'`) e Incoterm de cabecera (`'CCR'`/`'CIR'`=cliente retira). Visto en `Ventas_Nac` (2026-10-05), no verificado con `INFORMATION_SCHEMA` |
 | `vbfa` | `sap_sd` | `VBELV`, `VBELN`, `POSNN`, `VBTYP_N` | Flujo de documentos — el campo clave para casi todo el repo. Ver dominio de `VBTYP_N` en sección 3.1 |
 | `likp` | `sap_sd` | `VBELN`, `WADAT_IST` | Cabecera de entrega — fecha real de salida de mercancía. **Ver advertencia de confiabilidad en 3.1** |
 | `lips` | `sap_mm` (⚠) | `VBELN`, `POSNR`, `LFIMG` | Posición de entrega — cantidad despachada |
@@ -285,6 +286,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `log_fillrate_etapa5` | Efecto del repaqueteo sobre fill rate | Excel exportado (fuente SAP no reconstruida aún) | análisis Python | `log_fillrate_etapa5/CLAUDE.md` |
 | `prov_inventarios` | Provisión de deterioro (Daños/Obsoletos) vs. stock real por lote | `mchb`/`mcha`/`mch1`, `ckmlhd`/`ckmlcr` | `Procesos_CDS.prov_inventarios_monitor_dano/obsoletos` | `prov_inventarios/CLAUDE.md` |
 | `ventas_cl` | Detalle de ventas + ciclo completo (vigencia, crédito, despacho, factura, NC/devolución) | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbfa`/`vbrk`, `lips`, `mard` | `consulta_ventas_zpn_cl11.sql` | `ventas_cl/CLAUDE.md` |
+| `Ventas_Nac` | Detalle de ventas nacionales ZPN/CL11: ciclo completo (vigencia, crédito, despacho, factura, NC/devolución), cumplimiento por posición y cabecera, demanda abierta y posicionamiento de stock por zona logística | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbkd`/`vbfa`/`vbrk`, `likp`/`lips`, `mard`/`marc`/`marm`/`mara` | `Ventas_Nac/ventas_nac.sql` | — (sin `CLAUDE.md` propio) |
 | `ventas_stocks_ventas` | Stock por Material×Ubicación para Tableau (sin demanda) | `mara`/`mard`/`marc`/`marm` | `stock_ventas.sql` | `ventas_stocks_ventas/CLAUDE.md` |
 | `gv_rechazos_cl` | Facturas rechazadas por cliente (folio fiscal, transporte) | `vbrp`/`vbrk`/`vbak`/`vbpa`, `vttp`/`vttk`, `zconfol` | `monitor_rechazos.sql` | `gv_rechazos_cl/CLAUDE.md` |
 | `control_embarques` | Control de embarques + "potencial de transporte marítimo" | `ZCL_SD_DUS1`, `zsd_t_export` | placeholder | `control_embarques/CLAUDE.md` |
