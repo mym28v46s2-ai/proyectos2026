@@ -1070,6 +1070,10 @@ SELECT
     WHEN rb.Resto_Cantidad_Paquete = 0 THEN 'N'
     ELSE 'S'
   END                                                                AS Es_Repaqueteo,
+  -- Versión numérica para medir % de repaqueteo (AVG/SUM por pedido):
+  -- 1 = requiere repaqueteo; 0 = no requiere (estándar o fuera del
+  -- universo evaluado). El denominador incluye todas las posiciones.
+  IF(rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0, 1, 0) AS Flag_Repaqueteo,
   IF(
     rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
     CAST(TRUNC(CAST(rb.Cantidad_Venta AS NUMERIC) / rb.Unidades_por_Paquete) AS INT64),
