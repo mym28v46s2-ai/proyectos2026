@@ -46,7 +46,7 @@ updated: 2026-09-28
 
 | Tabla | Dataset | Campos clave usados | Uso |
 |---|---|---|---|
-| `mara` | `cdc_produccion_pp_cp50_01_new` | `MATNR`, `MEINS`, `VOLUM`, `VOLEH`, `MTART`, `BRGEW` | Datos generales, volumen y tipo de material |
+| `mara` | `cdc_produccion_pp_cp50_01_new` | `MATNR`, `MEINS`, `VOLUM`, `VOLEH`, `MTART`, `BRGEW`, `NTGEW`, `GEWEI` | Datos generales, volumen, peso y tipo de material. `BRGEW`/`NTGEW` = peso bruto/neto por unidad base, en la unidad `GEWEI` (columnas confirmadas en BQ 2026-10-05; dominio de `GEWEI` aún no revisado). Usado en `Ventas_Nac` (`KG_Venta`) |
 | `makt` | `cdc_produccion_pp_cp50_01_new` | `MATNR`, `MAKTX`, `SPRAS` | Descripción (usar `SPRAS='S'` para español) |
 | `marc` | `cdc_produccion_pp_cp50_01_new` | `MATNR`, `WERKS`, `PRENO`, `MAABC` | Material×Centro. `PRENO` (centro `TCDS`) = punto de pedido / horizonte de producción; `PRENO='D'` también se usa como marca de **obsolescencia**. `MAABC` = indicador ABC de MRP |
 | `marm` | `cdc_produccion_pp_cp50_01_new` | `MATNR`, `MEINH`, `UMREZ`, `UMREN`, `HOEHE`, `MEABM` | Conversión de unidades y espesor |
