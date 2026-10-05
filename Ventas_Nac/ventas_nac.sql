@@ -163,8 +163,38 @@ dimensiones AS (
       WHEN 'CDM' THEN COALESCE(VOLUM, 0) / 1000.0
       WHEN 'CM3' THEN COALESCE(VOLUM, 0) / 1000000.0
       ELSE             COALESCE(VOLUM, 0)
-    END AS volumen_unidad_m3
+    END AS volumen_unidad_m3,
+    -- Peso por unidad base (MEINS) normalizado a kg según GEWEI
+    -- (BRGEW/NTGEW/GEWEI confirmados en mara por el usuario,
+    -- 2026-10-05). Unidad de peso no reconocida -> NULL (no se asume kg).
+    BRGEW * CASE GEWEI
+      WHEN 'KG' THEN 1
+      WHEN 'G'  THEN 0.001
+      WHEN 'TO' THEN 1000
+      WHEN 'TON' THEN 1000
+    END AS peso_bruto_unidad_kg,
+    NTGEW * CASE GEWEI
+      WHEN 'KG' THEN 1
+      WHEN 'G'  THEN 0.001
+      WHEN 'TO' THEN 1000
+      WHEN 'TON' THEN 1000
+    END AS peso_neto_unidad_kg
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mara`
+),
+
+
+-- ============================================================
+-- CTE 2B: UNIDADES POR PAQUETE (MARM, MEINH='PAK')
+-- UMREZ del registro PAK = piezas por paquete estándar. Base de la
+-- metodología de repaqueteo (ver SELECT final).
+-- ============================================================
+unidades_paquete AS (
+  SELECT
+    MATNR,
+    MAX(UMREZ)                                              AS Unidades_por_Paquete
+  FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.marm`
+  WHERE MEINH = 'PAK'
+  GROUP BY MATNR
 ),
 
 
@@ -725,6 +755,8 @@ SELECT
 
   p.Cantidad_Venta,
   p.UM_Venta,
+  -- Piezas por paquete estándar (MARM.UMREZ con MEINH='PAK'). Ver CTE 2B.
+  up.Unidades_por_Paquete,
   -- M3 = cantidad en UM venta -> UM base (MARM) x volumen unitario
   -- (MARA), misma fórmula que llenado_capacidad.sql.
   ROUND(
@@ -732,6 +764,20 @@ SELECT
       * COALESCE(mu.UMREZ / NULLIF(mu.UMREN, 0), 1)
       * COALESCE(d.volumen_unidad_m3, 0)
   , 3)                                                             AS M3_Venta,
+  -- KG = cantidad en UM venta -> UM base (MARM) x peso por unidad base
+  -- (MARA.BRGEW/NTGEW normalizado a kg en dimensiones). NULL si el
+  -- material no tiene GEWEI reconocida. KG_Venta (bruto) es el que se
+  -- compara contra max_kg del camión.
+  ROUND(
+    p.Cantidad_Venta
+      * COALESCE(mu.UMREZ / NULLIF(mu.UMREN, 0), 1)
+      * d.peso_bruto_unidad_kg
+  , 3)                                                             AS KG_Venta,
+  ROUND(
+    p.Cantidad_Venta
+      * COALESCE(mu.UMREZ / NULLIF(mu.UMREN, 0), 1)
+      * d.peso_neto_unidad_kg
+  , 3)                                                             AS KG_Neto_Venta,
 
   -- CLP es moneda de 0 decimales en SAP pero se almacena con 2
   -- decimales implícitos -> x100 para el valor real.
@@ -834,6 +880,8 @@ LEFT JOIN descripciones_sku AS d6
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.marc` AS marc
   ON  marc.MATNR = p.Material
   AND marc.WERKS = 'TCDS'
+LEFT JOIN unidades_paquete AS up
+  ON up.MATNR = p.Material
 LEFT JOIN stock_disponible AS st
   ON st.Material = p.Material
 LEFT JOIN demanda_abierta_material AS dam
@@ -867,11 +915,41 @@ cumplimiento_cabecera AS (
     MAX(Fecha_Vigencia)                                                 AS Fecha_Vigencia_Pedido,
     ROUND(SUM(COALESCE(M3_Venta, 0)), 3)                                AS M3_pedido,
     MAX(max_vol)                                                        AS max_vol_pedido,
+    ROUND(SUM(COALESCE(KG_Venta, 0)), 3)                                AS KG_pedido,
+    MAX(max_kg)                                                         AS max_kg_pedido,
     SUM(COALESCE(Cantidad_Despachada, 0))                               AS Unidades_Entregadas_Pedido,
     SUM(Cantidad_Venta)                                                 AS Unidades_Comprometidas_Pedido,
     LOGICAL_OR(Categoria_Cumplimiento IN ('Cumplido con atraso', 'Atrasado en curso')) AS Tiene_Atraso_Pedido
   FROM resultado_base
   GROUP BY ID_Documento
+),
+
+
+-- ============================================================
+-- CTE 14B: BASE DE REPAQUETEO
+-- Universo: tableros (nivel_2_familia 'Aglomerado'/'MDF' y
+-- nivel_3_subfamilia 'Recubierto'/'Desnudo') vendidos en piezas
+-- (UM_Venta='ST') con paquete estándar en MARM (PAK, ver CTE 2B).
+-- Regla (aplicada en el SELECT final): la posición es estándar solo si
+-- la cantidad es múltiplo exacto de las piezas por paquete (40 de 20 =
+-- 2 paquetes); si no, hay que armar un paquete especial -> repaqueteo
+-- (ej. 7 de 20, y también 10 de 20 = medio paquete). El resto se
+-- calcula aquí una sola vez; columna auxiliar, se excluye del SELECT
+-- final.
+-- ============================================================
+base_repaqueteo AS (
+  SELECT
+    *,
+    COALESCE(
+      UPPER(TRIM(nivel_2_familia))    IN ('AGLOMERADO', 'MDF')
+      AND UPPER(TRIM(nivel_3_subfamilia)) IN ('RECUBIERTO', 'DESNUDO')
+      AND UM_Venta = 'ST'
+      AND Unidades_por_Paquete > 0
+      AND Cantidad_Venta > 0,
+      FALSE
+    )                                                                   AS En_Universo_Repaqueteo,
+    MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete
+  FROM resultado_base
 )
 
 
@@ -879,7 +957,7 @@ cumplimiento_cabecera AS (
 -- SELECT FINAL: agrega Segmento_Dias_Vigencia sobre resultado_base
 -- ============================================================
 SELECT
-  rb.*,
+  rb.* EXCEPT (En_Universo_Repaqueteo, Resto_Cantidad_Paquete),
   -- Ver CTE cumplimiento_cabecera.
   CASE
     WHEN cc.Unidades_Entregadas_Pedido = 0 AND cc.Fecha_Vigencia_Pedido >= CURRENT_DATE('America/Santiago')
@@ -898,6 +976,10 @@ SELECT
   -- NULL si no hay clase de camión (Centro_Abastecedor NULL).
   cc.M3_pedido,
   ROUND(SAFE_DIVIDE(cc.M3_pedido, cc.max_vol_pedido), 4)            AS Ocupacion_Camion,
+  -- Igual que Ocupacion_Camion, pero por peso bruto: KG_pedido /
+  -- max_kg. Posiciones sin peso (KG_Venta NULL) suman 0.
+  cc.KG_pedido,
+  ROUND(SAFE_DIVIDE(cc.KG_pedido, cc.max_kg_pedido), 4)             AS Ocupacion_Camion_KG,
   -- Dos escalas espejo según categoría: 'Atrasado en curso' usa escala
   -- negativa sobre Dias_Atraso_Preferente; 'Pendiente' usa escala
   -- positiva sobre Plazo_Restante. Resto queda NULL. Mismos cortes
@@ -979,7 +1061,25 @@ SELECT
     WHEN (Stock_Centro_Abastecedor / M3_Demanda_Abierta_Centro_Zona) < 0.5
       THEN 'Sin stock total'
     ELSE 'Posicionado'
-  END                                                                AS Categoria_Posicionamiento_Stock
-FROM resultado_base AS rb
+  END                                                                AS Categoria_Posicionamiento_Stock,
+
+  -- Repaqueteo: ver CTE base_repaqueteo para el universo y la regla.
+  IF(rb.En_Universo_Repaqueteo, 'S', 'N')                            AS Aplica_Repaqueteo,
+  CASE
+    WHEN NOT rb.En_Universo_Repaqueteo THEN NULL
+    WHEN rb.Resto_Cantidad_Paquete = 0 THEN 'N'
+    ELSE 'S'
+  END                                                                AS Es_Repaqueteo,
+  IF(
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
+    CAST(TRUNC(CAST(rb.Cantidad_Venta AS NUMERIC) / rb.Unidades_por_Paquete) AS INT64),
+    NULL
+  )                                                                  AS Paquetes_Completos,
+  IF(
+    rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
+    rb.Resto_Cantidad_Paquete,
+    NULL
+  )                                                                  AS Piezas_Repaqueteo
+FROM base_repaqueteo AS rb
 LEFT JOIN cumplimiento_cabecera AS cc
   ON cc.ID_Documento = rb.ID_Documento
