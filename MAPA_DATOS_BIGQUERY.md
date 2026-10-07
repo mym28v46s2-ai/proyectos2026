@@ -28,7 +28,7 @@ updated: 2026-09-28
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
-| `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
+| `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`, `Vol_Producir_M3`, `Estado_Pos` (`PEND`/`CUMP`/`SOBR`), `Booking`, `Salmer` (`S`/`N`), `Fecha_Embarque_Comprometida`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
 | `Procesos_CDS` | **Tablas de salida propias del repo** (no réplicas SAP) — resultado de los `CREATE OR REPLACE TABLE/VIEW` de los distintos proyectos | Ver catálogo completo en sección 5 |
 
 > [!warning] "Un dataset = un módulo SAP" es una trampa
