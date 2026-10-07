@@ -21,6 +21,19 @@
 --              MARM MEINH='M3' -> MARM 'DM3'/'CDM'/'L' (÷1000) -> MARM 'CM3'
 --              (÷1 000 000) -> MARA.VOLUM/VOLEH
 --
+-- estado_posicion: etapa de la posición. Las etapas son secuenciales; si una
+-- posición cumple varias, gana la más avanzada (se evalúa de atrás hacia
+-- adelante):
+--   5. Enviado          -> Booking no vacío y Salmer = 'S'
+--   4. Envio programado -> Booking no vacío y Salmer = 'N'
+--   3. Producido        -> Vol_Producir_M3 = 0 o Estado_Pos IN ('CUMP','SOBR')
+--   2. En producción    -> Estado_Pos = 'PEND' y Ctd_Ped_m3 > Vol_Producir_M3
+--   1. Recibido         -> Estado_Pos = 'PEND' y Ctd_Ped_m3 = Vol_Producir_M3
+--   Sin estado          -> no cumple ninguna (p. ej. PEND con
+--                          Ctd_Ped_m3 < Vol_Producir_M3, o Vol_Producir_M3 NULL)
+-- Los volúmenes se comparan redondeados a 3 decimales para evitar diferencias
+-- de punto flotante. Usa Ctd_Ped_m3 original (no Cta_ped_m3_b).
+--
 -- Supuestos a validar:
 --   - Validar contra SAP (VA03) un pedido bloqueado antes de usar en
 --     reportes: ver bug de volumen ~1000x en la sección 3.2 del mapa.
@@ -36,7 +49,13 @@ pedidos AS (
     t.*,
     LPAD(CAST(t.Documento_de_ventas AS STRING), 10, '0')           AS vbeln_join,
     LPAD(CAST(t.Posicion_Ped_Venta  AS STRING),  6, '0')           AS posnr_join,
-    COALESCE(UPPER(TRIM(CAST(t.Credito AS STRING))) = 'B', FALSE)  AS es_bloqueo_credito
+    COALESCE(UPPER(TRIM(CAST(t.Credito AS STRING))) = 'B', FALSE)  AS es_bloqueo_credito,
+    -- campos normalizados para estado_posicion
+    UPPER(TRIM(CAST(t.Estado_Pos AS STRING)))                      AS estado_pos_norm,
+    UPPER(TRIM(CAST(t.Salmer AS STRING)))                          AS salmer_norm,
+    COALESCE(TRIM(CAST(t.Booking AS STRING)), '') <> ''            AS tiene_booking,
+    ROUND(SAFE_CAST(t.Ctd_Ped_m3      AS FLOAT64), 3)              AS ctd_ped_m3_norm,
+    ROUND(SAFE_CAST(t.Vol_Producir_M3 AS FLOAT64), 3)              AS vol_producir_m3_norm
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
   -- Acepta DATE/DATETIME/TIMESTAMP, texto 'YYYY-MM-DD' o texto SAP 'YYYYMMDD'
   WHERE COALESCE(
@@ -119,14 +138,27 @@ posiciones_m3 AS (
 )
 
 SELECT
-  p.* EXCEPT (vbeln_join, posnr_join, es_bloqueo_credito),
+  p.* EXCEPT (vbeln_join, posnr_join, es_bloqueo_credito,
+             estado_pos_norm, salmer_norm, tiene_booking,
+             ctd_ped_m3_norm, vol_producir_m3_norm),
   ROUND(IF(p.es_bloqueo_credito, pm.qty_m3, p.Ctd_Ped_m3), 3) AS Cta_ped_m3_b,
   CASE
     WHEN NOT p.es_bloqueo_credito  THEN 'ORIGINAL'
     WHEN pm.vbeln IS NULL          THEN 'SIN_POSICION_VBAP'
     WHEN pm.qty_m3 IS NULL         THEN 'SIN_CONVERSION'
     ELSE pm.metodo_conversion_m3
-  END                                                        AS origen_m3_b
+  END                                                        AS origen_m3_b,
+  CASE
+    WHEN p.tiene_booking AND p.salmer_norm = 'S'           THEN 'Enviado'
+    WHEN p.tiene_booking AND p.salmer_norm = 'N'           THEN 'Envio programado'
+    WHEN p.vol_producir_m3_norm = 0
+      OR p.estado_pos_norm IN ('CUMP', 'SOBR')             THEN 'Producido'
+    WHEN p.estado_pos_norm = 'PEND'
+      AND p.ctd_ped_m3_norm > p.vol_producir_m3_norm       THEN 'En producción'
+    WHEN p.estado_pos_norm = 'PEND'
+      AND p.ctd_ped_m3_norm = p.vol_producir_m3_norm       THEN 'Recibido'
+    ELSE 'Sin estado'
+  END                                                        AS estado_posicion
 FROM pedidos AS p
 LEFT JOIN posiciones_m3 AS pm
   ON  pm.vbeln = p.vbeln_join
