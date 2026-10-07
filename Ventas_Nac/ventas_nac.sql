@@ -950,6 +950,28 @@ base_repaqueteo AS (
     )                                                                   AS En_Universo_Repaqueteo,
     MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete
   FROM resultado_base
+),
+
+
+-- ============================================================
+-- CTE 14C: REPAQUETEO A NIVEL PEDIDO
+-- % de posiciones del pedido que requieren repaqueteo (misma regla que
+-- Flag_Repaqueteo: las posiciones fuera del universo cuentan como 0,
+-- el denominador son todas las posiciones del pedido). La categoría
+-- se asigna por tramos: 0% / Hasta 20% / 20-40% / 40-60% / 60-80% /
+-- Sobre 80% (límite superior incluido en cada tramo).
+-- ============================================================
+repaqueteo_pedido AS (
+  SELECT
+    ID_Documento,
+    COUNTIF(En_Universo_Repaqueteo AND Resto_Cantidad_Paquete != 0)     AS Posiciones_Repaqueteo_Pedido,
+    COUNT(*)                                                            AS Posiciones_Pedido,
+    SAFE_DIVIDE(
+      COUNTIF(En_Universo_Repaqueteo AND Resto_Cantidad_Paquete != 0),
+      COUNT(*)
+    )                                                                   AS Pct_Repaqueteo_Pedido
+  FROM base_repaqueteo
+  GROUP BY ID_Documento
 )
 
 
@@ -1074,6 +1096,28 @@ SELECT
   -- 1 = requiere repaqueteo; 0 = no requiere (estándar o fuera del
   -- universo evaluado). El denominador incluye todas las posiciones.
   IF(rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0, 1, 0) AS Flag_Repaqueteo,
+  -- Evaluación a nivel pedido (repetida en cada posición). Ver CTE 14C.
+  rp.Posiciones_Repaqueteo_Pedido,
+  rp.Posiciones_Pedido,
+  ROUND(rp.Pct_Repaqueteo_Pedido, 4)                                 AS Pct_Repaqueteo_Pedido,
+  CASE
+    WHEN rp.Pct_Repaqueteo_Pedido = 0    THEN '0%'
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.2 THEN 'Hasta 20%'
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.4 THEN '20-40%'
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.6 THEN '40-60%'
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.8 THEN '60-80%'
+    ELSE 'Sobre 80%'
+  END                                                                AS Categoria_Repaqueteo_Pedido,
+  -- Orden numérico para ordenar la categoría en tableros (1 = 0%,
+  -- 6 = Sobre 80%).
+  CASE
+    WHEN rp.Pct_Repaqueteo_Pedido = 0    THEN 1
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.2 THEN 2
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.4 THEN 3
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.6 THEN 4
+    WHEN rp.Pct_Repaqueteo_Pedido <= 0.8 THEN 5
+    ELSE 6
+  END                                                                AS Orden_Categoria_Repaqueteo_Pedido,
   IF(
     rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0,
     CAST(TRUNC(CAST(rb.Cantidad_Venta AS NUMERIC) / rb.Unidades_por_Paquete) AS INT64),
@@ -1087,3 +1131,5 @@ SELECT
 FROM base_repaqueteo AS rb
 LEFT JOIN cumplimiento_cabecera AS cc
   ON cc.ID_Documento = rb.ID_Documento
+LEFT JOIN repaqueteo_pedido AS rp
+  ON rp.ID_Documento = rb.ID_Documento
