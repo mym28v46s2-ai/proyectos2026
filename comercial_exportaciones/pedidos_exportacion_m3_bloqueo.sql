@@ -24,11 +24,17 @@
 -- estado_posicion: etapa de la posición. Las etapas son secuenciales; si una
 -- posición cumple varias, gana la más avanzada (se evalúa de atrás hacia
 -- adelante):
---   0. Rechazado        -> la posición tiene motivo de rechazo en SAP
---                          (VBAP.ABGRU no vacío): no se suministrará.
---                          Prioridad sobre cualquier otra etapa.
+--   Rechazado        -> motivo de rechazo en SAP (VBAP.ABGRU no vacío) con
+--                       el crédito NO bloqueado (Credito <> 'B'): decisión
+--                       comercial de no suministrar. Prioridad máxima.
 --   5. Enviado          -> Booking no vacío y Salmer = 'S'
 --   4. Envio programado -> Booking no vacío y Salmer = 'N'
+--   Bloqueo crédito  -> Credito = 'B' y aún no enviado/programado. El bloqueo
+--                       de crédito en SAP pone ABGRU en las posiciones hasta
+--                       que se gestione el desbloqueo: ese ABGRU NO es un
+--                       rechazo real, y Ctd_Ped_m3 viene en 0 (ver
+--                       Cta_ped_m3_b), por lo que no se evalúan las etapas
+--                       de producción.
 --   3. Producido        -> Vol_Producir_M3 = 0 o Estado_Pos IN ('CUMP','SOBR')
 --   2. En producción    -> Estado_Pos = 'PEND' y Ctd_Ped_m3 > Vol_Producir_M3
 --   1. Recibido         -> Estado_Pos = 'PEND' y Ctd_Ped_m3 = Vol_Producir_M3
@@ -166,9 +172,11 @@ SELECT
   END                                                        AS origen_m3_b,
   r.motivo_rechazo                                           AS Motivo_Rechazo_VBAP,
   CASE
-    WHEN r.motivo_rechazo IS NOT NULL                      THEN 'Rechazado'
+    WHEN r.motivo_rechazo IS NOT NULL
+      AND NOT p.es_bloqueo_credito                         THEN 'Rechazado'
     WHEN p.tiene_booking AND p.salmer_norm = 'S'           THEN 'Enviado'
     WHEN p.tiene_booking AND p.salmer_norm = 'N'           THEN 'Envio programado'
+    WHEN p.es_bloqueo_credito                              THEN 'Bloqueo crédito'
     WHEN p.vol_producir_m3_norm = 0
       OR p.estado_pos_norm IN ('CUMP', 'SOBR')             THEN 'Producido'
     WHEN p.estado_pos_norm = 'PEND'
