@@ -24,13 +24,59 @@
 -- estado_posicion: etapa de la posición. Las etapas son secuenciales; si una
 -- posición cumple varias, gana la más avanzada (se evalúa de atrás hacia
 -- adelante):
---   5. Enviado          -> Booking no vacío y Salmer = 'S'
---   4. Envio programado -> Booking no vacío y Salmer = 'N'
+--   Rechazado        -> motivo de rechazo en SAP (VBAP.ABGRU no vacío) con
+--                       el crédito NO bloqueado (Credito <> 'B'): decisión
+--                       comercial de no suministrar. Prioridad máxima.
+--   5. Enviado          -> Salmer = 'S' (salida de mercancía contabilizada;
+--                          es lo que define el envío, con o sin Booking)
+--   4. Envio programado -> Booking no vacío y Salmer <> 'S' (Booking = solo
+--                          agendamiento de nave)
+--                          Envíos terrestres (Nombre_de_Nave = 'Camion',
+--                          p. ej. Chile -> Argentina) no llevan Booking: pasan
+--                          directo a Enviado con Salmer = 'S', sin etapa de
+--                          programado (confirmado por usuario 2026-10-08).
+--   Bloqueo crédito  -> Credito = 'B' y aún no enviado/programado. El bloqueo
+--                       de crédito en SAP pone ABGRU en las posiciones hasta
+--                       que se gestione el desbloqueo: ese ABGRU NO es un
+--                       rechazo real, y Ctd_Ped_m3 viene en 0 (ver
+--                       Cta_ped_m3_b), por lo que no se evalúan las etapas
+--                       de producción.
 --   3. Producido        -> Vol_Producir_M3 = 0 o Estado_Pos IN ('CUMP','SOBR')
 --   2. En producción    -> Estado_Pos = 'PEND' y Ctd_Ped_m3 > Vol_Producir_M3
---   1. Recibido         -> Estado_Pos = 'PEND' y Ctd_Ped_m3 = Vol_Producir_M3
---   Sin estado          -> no cumple ninguna (p. ej. PEND con
---                          Ctd_Ped_m3 < Vol_Producir_M3, o Vol_Producir_M3 NULL)
+--   1. Recibido         -> Estado_Pos = 'PEND' y Ctd_Ped_m3 <= Vol_Producir_M3
+--                          (Fabricado = Ctd_Ped_m3 - Vol_Producir_M3 <= 0: nada
+--                          fabricado; el negativo se trata como 0, igual que
+--                          en Looker)
+--   Sin estado          -> no cumple ninguna (p. ej. Vol_Producir_M3 NULL o
+--                          Estado_Pos fuera de PEND/CUMP/SOBR)
+-- Las posiciones Rechazado conservan su volumen (Cta_ped_m3_b); solo cambia
+-- el estado.
+--
+-- estado_pedido (repetido en cada fila del pedido). Se consideran solo las
+-- posiciones "válidas": se excluyen Rechazado y Sin estado.
+--   Rechazado                              -> todas las posiciones rechazadas
+--                                             (solo ocurre con crédito A/D)
+--   Sin estado                             -> ninguna posición válida
+--   Bloqueo crédito                        -> hay posiciones en Bloqueo crédito.
+--                                             Un pedido liberado no se vuelve a
+--                                             bloquear (confirmado por usuario
+--                                             2026-10-08), así que un pedido
+--                                             bloqueado no tiene envíos previos.
+--   Enviado                  -> todas Enviado
+--   Parcialmente enviado     -> alguna Enviado
+--   Envio programado         -> todas Envio programado (o más avanzadas)
+--   Parcialmente programado  -> alguna Envio programado
+--   Producido                -> todas Producido (o más avanzadas)
+--   Parcialmente producido   -> alguna Producido
+--   En producción            -> alguna En producción, ninguna producida
+--   Recibido                 -> todas Recibido
+-- n_envios_pedido: envíos distintos con Salmer = 'S'. Un envío = Booking; si
+--   no hay Booking (camión) = Nombre_de_Nave + Inic_pl_transporte.
+-- pct_m3_enviado_pedido: m3 Enviado / m3 de posiciones válidas (sobre
+--   Cta_ped_m3_b, fracción 0-1 para formato % en Looker).
+--
+-- Motivo_Rechazo_VBAP: código crudo de VBAP.ABGRU (TVAG/TVAGT no están
+-- replicadas, sin descripción; ver sección 2.6 del mapa).
 -- Los volúmenes se comparan redondeados a 3 decimales para evitar diferencias
 -- de punto flotante. Usa Ctd_Ped_m3 original (no Cta_ped_m3_b).
 --
@@ -55,7 +101,13 @@ pedidos AS (
     UPPER(TRIM(CAST(t.Salmer AS STRING)))                          AS salmer_norm,
     COALESCE(TRIM(CAST(t.Booking AS STRING)), '') <> ''            AS tiene_booking,
     ROUND(SAFE_CAST(t.Ctd_Ped_m3      AS FLOAT64), 3)              AS ctd_ped_m3_norm,
-    ROUND(SAFE_CAST(t.Vol_Producir_M3 AS FLOAT64), 3)              AS vol_producir_m3_norm
+    ROUND(SAFE_CAST(t.Vol_Producir_M3 AS FLOAT64), 3)              AS vol_producir_m3_norm,
+    -- identifica un envío: Booking, o nave + inicio de viaje si no hay Booking
+    COALESCE(
+      NULLIF(TRIM(CAST(t.Booking AS STRING)), ''),
+      CONCAT('SIN_BOOKING|', COALESCE(TRIM(CAST(t.Nombre_de_Nave AS STRING)), ''),
+             '|', COALESCE(CAST(t.Inic_pl_transporte AS STRING), ''))
+    )                                                              AS envio_key
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
   -- Acepta DATE/DATETIME/TIMESTAMP, texto 'YYYY-MM-DD' o texto SAP 'YYYYMMDD'
   WHERE COALESCE(
@@ -69,6 +121,17 @@ pedidos_bloqueados AS (
   SELECT DISTINCT vbeln_join AS vbeln
   FROM pedidos
   WHERE es_bloqueo_credito
+),
+
+-- Posiciones rechazadas en SAP (VBAP.ABGRU), para todos los pedidos del período
+posiciones_rechazadas AS (
+  SELECT
+    LPAD(CAST(v.VBELN AS STRING), 10, '0')  AS vbeln,
+    LPAD(CAST(v.POSNR AS STRING),  6, '0')  AS posnr,
+    TRIM(CAST(v.ABGRU AS STRING))           AS motivo_rechazo
+  FROM `aecorsoft.sap_sd.vbap` AS v
+  WHERE LPAD(CAST(v.VBELN AS STRING), 10, '0') IN (SELECT DISTINCT vbeln_join FROM pedidos)
+    AND COALESCE(TRIM(CAST(v.ABGRU AS STRING)), '') <> ''
 ),
 
 posiciones AS (
@@ -135,33 +198,95 @@ posiciones_m3 AS (
   LEFT JOIN marm               AS mv ON mv.matnr = p.matnr AND mv.meinh = p.vrkme
   LEFT JOIN m3_por_unidad_base AS u  ON u.matnr  = p.matnr
   LEFT JOIN mara_vol           AS ma ON ma.matnr = p.matnr
+),
+
+detalle_posicion AS (
+  SELECT
+    p.* EXCEPT (posnr_join, es_bloqueo_credito,
+               estado_pos_norm, salmer_norm, tiene_booking,
+               ctd_ped_m3_norm, vol_producir_m3_norm),
+    ROUND(IF(p.es_bloqueo_credito, pm.qty_m3, p.Ctd_Ped_m3), 3) AS Cta_ped_m3_b,
+    CASE
+      WHEN NOT p.es_bloqueo_credito  THEN 'ORIGINAL'
+      WHEN pm.vbeln IS NULL          THEN 'SIN_POSICION_VBAP'
+      WHEN pm.qty_m3 IS NULL         THEN 'SIN_CONVERSION'
+      ELSE pm.metodo_conversion_m3
+    END                                                        AS origen_m3_b,
+    r.motivo_rechazo                                           AS Motivo_Rechazo_VBAP,
+    CASE
+      WHEN r.motivo_rechazo IS NOT NULL
+        AND NOT p.es_bloqueo_credito                         THEN 'Rechazado'
+      WHEN p.salmer_norm = 'S'                               THEN 'Enviado'
+      WHEN p.tiene_booking                                   THEN 'Envio programado'
+      WHEN p.es_bloqueo_credito                              THEN 'Bloqueo crédito'
+      WHEN p.vol_producir_m3_norm = 0
+        OR p.estado_pos_norm IN ('CUMP', 'SOBR')             THEN 'Producido'
+      WHEN p.estado_pos_norm = 'PEND'
+        AND p.ctd_ped_m3_norm > p.vol_producir_m3_norm       THEN 'En producción'
+      WHEN p.estado_pos_norm = 'PEND'
+        AND p.ctd_ped_m3_norm <= p.vol_producir_m3_norm      THEN 'Recibido'
+      ELSE 'Sin estado'
+    END                                                        AS estado_posicion
+  FROM pedidos AS p
+  LEFT JOIN posiciones_m3 AS pm
+    ON  pm.vbeln = p.vbeln_join
+    AND pm.posnr = p.posnr_join
+    AND p.es_bloqueo_credito
+  LEFT JOIN posiciones_rechazadas AS r
+    ON  r.vbeln = p.vbeln_join
+    AND r.posnr = p.posnr_join
+),
+
+resumen_pedido AS (
+  SELECT
+    vbeln_join,
+    COUNT(*)                                                         AS n_posiciones,
+    COUNTIF(estado_posicion = 'Rechazado')                           AS n_rechazadas,
+    COUNTIF(estado_posicion NOT IN ('Rechazado', 'Sin estado'))      AS n_validas,
+    COUNTIF(estado_posicion = 'Bloqueo crédito')                     AS n_bloqueo,
+    COUNTIF(estado_posicion = 'Enviado')                             AS n_enviadas,
+    COUNTIF(estado_posicion = 'Envio programado')                    AS n_programadas,
+    -- etapa 1..5 de las posiciones válidas sin bloqueo
+    MIN(etapa)                                                       AS etapa_min,
+    MAX(etapa)                                                       AS etapa_max,
+    COUNT(DISTINCT IF(estado_posicion = 'Enviado', envio_key, NULL)) AS n_envios,
+    SAFE_DIVIDE(
+      SUM(IF(estado_posicion = 'Enviado', COALESCE(Cta_ped_m3_b, 0), 0)),
+      SUM(IF(estado_posicion NOT IN ('Rechazado', 'Sin estado'), COALESCE(Cta_ped_m3_b, 0), 0))
+    )                                                                AS pct_m3_enviado
+  FROM (
+    SELECT
+      d.*,
+      CASE d.estado_posicion
+        WHEN 'Recibido'         THEN 1
+        WHEN 'En producción'    THEN 2
+        WHEN 'Producido'        THEN 3
+        WHEN 'Envio programado' THEN 4
+        WHEN 'Enviado'          THEN 5
+      END AS etapa
+    FROM detalle_posicion AS d
+  )
+  GROUP BY vbeln_join
 )
 
 SELECT
-  p.* EXCEPT (vbeln_join, posnr_join, es_bloqueo_credito,
-             estado_pos_norm, salmer_norm, tiene_booking,
-             ctd_ped_m3_norm, vol_producir_m3_norm),
-  ROUND(IF(p.es_bloqueo_credito, pm.qty_m3, p.Ctd_Ped_m3), 3) AS Cta_ped_m3_b,
+  d.* EXCEPT (vbeln_join, envio_key),
   CASE
-    WHEN NOT p.es_bloqueo_credito  THEN 'ORIGINAL'
-    WHEN pm.vbeln IS NULL          THEN 'SIN_POSICION_VBAP'
-    WHEN pm.qty_m3 IS NULL         THEN 'SIN_CONVERSION'
-    ELSE pm.metodo_conversion_m3
-  END                                                        AS origen_m3_b,
-  CASE
-    WHEN p.tiene_booking AND p.salmer_norm = 'S'           THEN 'Enviado'
-    WHEN p.tiene_booking AND p.salmer_norm = 'N'           THEN 'Envio programado'
-    WHEN p.vol_producir_m3_norm = 0
-      OR p.estado_pos_norm IN ('CUMP', 'SOBR')             THEN 'Producido'
-    WHEN p.estado_pos_norm = 'PEND'
-      AND p.ctd_ped_m3_norm > p.vol_producir_m3_norm       THEN 'En producción'
-    WHEN p.estado_pos_norm = 'PEND'
-      AND p.ctd_ped_m3_norm = p.vol_producir_m3_norm       THEN 'Recibido'
-    ELSE 'Sin estado'
-  END                                                        AS estado_posicion
-FROM pedidos AS p
-LEFT JOIN posiciones_m3 AS pm
-  ON  pm.vbeln = p.vbeln_join
-  AND pm.posnr = p.posnr_join
-  AND p.es_bloqueo_credito
---WHERE p.vbeln_join = '1100168067'   -- validar un pedido puntual
+    WHEN rp.n_validas = 0 AND rp.n_rechazadas = rp.n_posiciones THEN 'Rechazado'
+    WHEN rp.n_validas = 0                                       THEN 'Sin estado'
+    WHEN rp.n_bloqueo > 0                                       THEN 'Bloqueo crédito'
+    WHEN rp.etapa_min = 5                                       THEN 'Enviado'
+    WHEN rp.n_enviadas > 0                                      THEN 'Parcialmente enviado'
+    WHEN rp.etapa_min = 4                                       THEN 'Envio programado'
+    WHEN rp.n_programadas > 0                                   THEN 'Parcialmente programado'
+    WHEN rp.etapa_min = 3                                       THEN 'Producido'
+    WHEN rp.etapa_max >= 3                                      THEN 'Parcialmente producido'
+    WHEN rp.etapa_max = 2                                       THEN 'En producción'
+    ELSE 'Recibido'
+  END                                                           AS estado_pedido,
+  rp.n_envios                                                   AS n_envios_pedido,
+  ROUND(rp.pct_m3_enviado, 4)                                   AS pct_m3_enviado_pedido
+FROM detalle_posicion AS d
+LEFT JOIN resumen_pedido AS rp
+  ON rp.vbeln_join = d.vbeln_join
+--WHERE d.vbeln_join = '1100167396'   -- validar un pedido puntual

@@ -28,7 +28,7 @@ updated: 2026-09-28
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
-| `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`, `Vol_Producir_M3`, `Estado_Pos` (`PEND`/`CUMP`/`SOBR`), `Booking`, `Salmer` (`S`/`N`), `Fecha_Embarque_Comprometida`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
+| `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`, `Vol_Producir_M3`, `Estado_Pos` (`PEND`/`CUMP`/`SOBR`), `Booking` (solo agendamiento de nave), `Salmer` (`S`=salida de mercancía contabilizada / `N`), `Fecha_Embarque_Comprometida`, `Nombre_de_Nave` (`'Camion'`=envío terrestre, sin `Booking`), `Inic_pl_transporte`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
 | `Procesos_CDS` | **Tablas de salida propias del repo** (no réplicas SAP) — resultado de los `CREATE OR REPLACE TABLE/VIEW` de los distintos proyectos | Ver catálogo completo en sección 5 |
 
 > [!warning] "Un dataset = un módulo SAP" es una trampa
@@ -239,6 +239,7 @@ CLP) y aplicado igual en `ventas_cl` (`VBAP.NETWR`).
 | Campo | Tabla | Valores confirmados | Fuente |
 |---|---|---|---|
 | `VBUK.CMGST` (status crédito) | `vbuk` | `A`=OK, `B`=Bloqueado, `D`=Liberado, `''`(blanco)=no documentado (~237 casos) | `ventas_cl`, `log_fillrate_etapa4` |
+| `VBAP.ABGRU` (motivo rechazo) | `vbap` | El **bloqueo de crédito** (`CMGST`/`Credito='B'`) pone `ABGRU` en las posiciones hasta que se gestione el desbloqueo → **no es rechazo real**. Solo con crédito liberado (`A`/`D`) un `ABGRU` es decisión comercial de no suministrar. Texto del código no disponible (`TVAG`/`TVAGT` no replicadas) | Confirmado por usuario contra SAP (2026-10-08), `comercial_exportaciones` |
 | `VBAK.LIFSK` (bloqueo entrega) | `vbak` | `'08'`=Kanban (bloqueo comercial), `'10'`=Aprobar descuento manual | `log_fillrate_etapa4` |
 | `MARC.PRENO` | `marc` | `P`=a pedido (+20d horizonte), `S`=a stock (0d), `D`=obsoleto (0d, también usado como flag de Obsolescencia en `prov_inventarios`), `NULL`=tratar como `P` (conservador) | `fillrate_etapa2`, `prov_inventarios` — **dominio real aún no validado al 100% en BQ, puede haber códigos fuera de estos 4** |
 | `VBTYP_N` | `vbfa` | ver tabla 3.1 | — |
@@ -279,7 +280,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | Proyecto | Pregunta de negocio | Tablas SAP clave | Salida | `CLAUDE.md` |
 |---|---|---|---|---|
 | `fillrate_2026` | Fill rate histórico ZPN/CL11, backfill de stock diario | `vbak`/`vbap`, `mard`, `mseg_full`/`mkpf` | `Procesos_CDS.stock_diario_backfill`, `materiales_interes` | — (sin `CLAUDE.md` propio; lógica base para etapa2/3) |
-| `comercial_exportaciones` | Pedidos de exportación con m3 recalculado desde `VBAP` cuando la posición está bloqueada por crédito (`Credito='B'`) | `Comercial.Tabla_Pedidos_Exportacion`, `vbap`, `marm`/`mara` | `pedidos_exportacion_m3_bloqueo.sql` (columnas `Cta_ped_m3_b`, `origen_m3_b`) | — (sin `CLAUDE.md` propio) |
+| `comercial_exportaciones` | Pedidos de exportación: m3 recalculado desde `VBAP` cuando la posición está bloqueada por crédito (`Credito='B'`), estado por posición y por pedido (Recibido → Enviado, rechazo, bloqueo crédito) | `Comercial.Tabla_Pedidos_Exportacion`, `vbap`, `marm`/`mara` | `pedidos_exportacion_m3_bloqueo.sql` (columnas `Cta_ped_m3_b`, `origen_m3_b`, `estado_posicion`, `estado_pedido`, `n_envios_pedido`, `pct_m3_enviado_pedido`) | — (sin `CLAUDE.md` propio) |
 | `fillrate_etapa2` | Monitor forward-looking de cobertura stock vs. demanda, por Material | `vbak`/`vbap`, `mara`/`marm`/`mard`/`marc` | `llenado_capacidad.sql`, `detalle_pedidos_clientes.sql` (fuente Looker) | `fillrate_etapa2/CLAUDE.md` |
 | `fillrate_etapa3` | Causa raíz backward-looking de líneas incumplidas | + `stock_diario_backfill` | `fillrate_analityc2026_causa_raiz.sql` | `fillrate_etapa3/CLAUDE.md` |
 | `log_fillrate_etapa4` | ¿Cuánto del incumplimiento es bloqueo comercial/crédito, no falta de stock? | `CDHDR`/`CDPOS` (vía SE16N manual, no BQ) | `fillrate_causa_raiz_bloqueo_comercial.sql` | `log_fillrate_etapa4/CLAUDE.md` |
