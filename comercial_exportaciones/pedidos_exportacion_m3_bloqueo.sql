@@ -27,8 +27,10 @@
 --   Rechazado        -> motivo de rechazo en SAP (VBAP.ABGRU no vacío) con
 --                       el crédito NO bloqueado (Credito <> 'B'): decisión
 --                       comercial de no suministrar. Prioridad máxima.
---   5. Enviado          -> Booking no vacío y Salmer = 'S'
---   4. Envio programado -> Booking no vacío y Salmer = 'N'
+--   5. Enviado          -> Salmer = 'S' (salida de mercancía contabilizada;
+--                          es lo que define el envío, con o sin Booking)
+--   4. Envio programado -> Booking no vacío y Salmer <> 'S' (Booking = solo
+--                          agendamiento de nave)
 --   Bloqueo crédito  -> Credito = 'B' y aún no enviado/programado. El bloqueo
 --                       de crédito en SAP pone ABGRU en las posiciones hasta
 --                       que se gestione el desbloqueo: ese ABGRU NO es un
@@ -174,8 +176,8 @@ SELECT
   CASE
     WHEN r.motivo_rechazo IS NOT NULL
       AND NOT p.es_bloqueo_credito                         THEN 'Rechazado'
-    WHEN p.tiene_booking AND p.salmer_norm = 'S'           THEN 'Enviado'
-    WHEN p.tiene_booking AND p.salmer_norm = 'N'           THEN 'Envio programado'
+    WHEN p.salmer_norm = 'S'                               THEN 'Enviado'
+    WHEN p.tiene_booking                                   THEN 'Envio programado'
     WHEN p.es_bloqueo_credito                              THEN 'Bloqueo crédito'
     WHEN p.vol_producir_m3_norm = 0
       OR p.estado_pos_norm IN ('CUMP', 'SOBR')             THEN 'Producido'
