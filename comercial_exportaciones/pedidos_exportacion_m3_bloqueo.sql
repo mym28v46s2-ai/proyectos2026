@@ -24,6 +24,9 @@
 -- estado_posicion: etapa de la posición. Las etapas son secuenciales; si una
 -- posición cumple varias, gana la más avanzada (se evalúa de atrás hacia
 -- adelante):
+--   0. Rechazado        -> la posición tiene motivo de rechazo en SAP
+--                          (VBAP.ABGRU no vacío): no se suministrará.
+--                          Prioridad sobre cualquier otra etapa.
 --   5. Enviado          -> Booking no vacío y Salmer = 'S'
 --   4. Envio programado -> Booking no vacío y Salmer = 'N'
 --   3. Producido        -> Vol_Producir_M3 = 0 o Estado_Pos IN ('CUMP','SOBR')
@@ -31,6 +34,8 @@
 --   1. Recibido         -> Estado_Pos = 'PEND' y Ctd_Ped_m3 = Vol_Producir_M3
 --   Sin estado          -> no cumple ninguna (p. ej. PEND con
 --                          Ctd_Ped_m3 < Vol_Producir_M3, o Vol_Producir_M3 NULL)
+-- Motivo_Rechazo_VBAP: código crudo de VBAP.ABGRU (TVAG/TVAGT no están
+-- replicadas, sin descripción; ver sección 2.6 del mapa).
 -- Los volúmenes se comparan redondeados a 3 decimales para evitar diferencias
 -- de punto flotante. Usa Ctd_Ped_m3 original (no Cta_ped_m3_b).
 --
@@ -69,6 +74,17 @@ pedidos_bloqueados AS (
   SELECT DISTINCT vbeln_join AS vbeln
   FROM pedidos
   WHERE es_bloqueo_credito
+),
+
+-- Posiciones rechazadas en SAP (VBAP.ABGRU), para todos los pedidos del período
+posiciones_rechazadas AS (
+  SELECT
+    LPAD(CAST(v.VBELN AS STRING), 10, '0')  AS vbeln,
+    LPAD(CAST(v.POSNR AS STRING),  6, '0')  AS posnr,
+    TRIM(CAST(v.ABGRU AS STRING))           AS motivo_rechazo
+  FROM `aecorsoft.sap_sd.vbap` AS v
+  WHERE LPAD(CAST(v.VBELN AS STRING), 10, '0') IN (SELECT DISTINCT vbeln_join FROM pedidos)
+    AND COALESCE(TRIM(CAST(v.ABGRU AS STRING)), '') <> ''
 ),
 
 posiciones AS (
@@ -148,7 +164,9 @@ SELECT
     WHEN pm.qty_m3 IS NULL         THEN 'SIN_CONVERSION'
     ELSE pm.metodo_conversion_m3
   END                                                        AS origen_m3_b,
+  r.motivo_rechazo                                           AS Motivo_Rechazo_VBAP,
   CASE
+    WHEN r.motivo_rechazo IS NOT NULL                      THEN 'Rechazado'
     WHEN p.tiene_booking AND p.salmer_norm = 'S'           THEN 'Enviado'
     WHEN p.tiene_booking AND p.salmer_norm = 'N'           THEN 'Envio programado'
     WHEN p.vol_producir_m3_norm = 0
@@ -164,4 +182,7 @@ LEFT JOIN posiciones_m3 AS pm
   ON  pm.vbeln = p.vbeln_join
   AND pm.posnr = p.posnr_join
   AND p.es_bloqueo_credito
+LEFT JOIN posiciones_rechazadas AS r
+  ON  r.vbeln = p.vbeln_join
+  AND r.posnr = p.posnr_join
 --WHERE p.vbeln_join = '1100168067'   -- validar un pedido puntual
