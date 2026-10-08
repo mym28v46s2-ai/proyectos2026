@@ -239,6 +239,7 @@ CLP) y aplicado igual en `ventas_cl` (`VBAP.NETWR`).
 | Campo | Tabla | Valores confirmados | Fuente |
 |---|---|---|---|
 | `VBUK.CMGST` (status crédito) | `vbuk` | `A`=OK, `B`=Bloqueado, `D`=Liberado, `''`(blanco)=no documentado (~237 casos) | `ventas_cl`, `log_fillrate_etapa4` |
+| `VBAP.ABGRU` (motivo rechazo) | `vbap` | El **bloqueo de crédito** (`CMGST`/`Credito='B'`) pone `ABGRU` en las posiciones hasta que se gestione el desbloqueo → **no es rechazo real**. Solo con crédito liberado (`A`/`D`) un `ABGRU` es decisión comercial de no suministrar. Texto del código no disponible (`TVAG`/`TVAGT` no replicadas) | Confirmado por usuario contra SAP (2026-10-08), `comercial_exportaciones` |
 | `VBAK.LIFSK` (bloqueo entrega) | `vbak` | `'08'`=Kanban (bloqueo comercial), `'10'`=Aprobar descuento manual | `log_fillrate_etapa4` |
 | `MARC.PRENO` | `marc` | `P`=a pedido (+20d horizonte), `S`=a stock (0d), `D`=obsoleto (0d, también usado como flag de Obsolescencia en `prov_inventarios`), `NULL`=tratar como `P` (conservador) | `fillrate_etapa2`, `prov_inventarios` — **dominio real aún no validado al 100% en BQ, puede haber códigos fuera de estos 4** |
 | `VBTYP_N` | `vbfa` | ver tabla 3.1 | — |
