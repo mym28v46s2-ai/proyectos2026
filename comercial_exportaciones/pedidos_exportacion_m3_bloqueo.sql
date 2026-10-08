@@ -31,6 +31,10 @@
 --                          es lo que define el envío, con o sin Booking)
 --   4. Envio programado -> Booking no vacío y Salmer <> 'S' (Booking = solo
 --                          agendamiento de nave)
+--                          Envíos terrestres (Nombre_de_Nave = 'Camion',
+--                          p. ej. Chile -> Argentina) no llevan Booking: pasan
+--                          directo a Enviado con Salmer = 'S', sin etapa de
+--                          programado (confirmado por usuario 2026-10-08).
 --   Bloqueo crédito  -> Credito = 'B' y aún no enviado/programado. El bloqueo
 --                       de crédito en SAP pone ABGRU en las posiciones hasta
 --                       que se gestione el desbloqueo: ese ABGRU NO es un
