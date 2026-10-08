@@ -57,8 +57,11 @@
 --   Rechazado                              -> todas las posiciones rechazadas
 --                                             (solo ocurre con crédito A/D)
 --   Sin estado                             -> ninguna posición válida
---   Parcialmente enviado – bloqueo crédito -> hay Bloqueo crédito y alguna Enviado
---   Bloqueo crédito                        -> hay Bloqueo crédito, nada enviado
+--   Bloqueo crédito                        -> hay posiciones en Bloqueo crédito.
+--                                             Un pedido liberado no se vuelve a
+--                                             bloquear (confirmado por usuario
+--                                             2026-10-08), así que un pedido
+--                                             bloqueado no tiene envíos previos.
 --   Enviado                  -> todas Enviado
 --   Parcialmente enviado     -> alguna Enviado
 --   Envio programado         -> todas Envio programado (o más avanzadas)
@@ -271,7 +274,6 @@ SELECT
   CASE
     WHEN rp.n_validas = 0 AND rp.n_rechazadas = rp.n_posiciones THEN 'Rechazado'
     WHEN rp.n_validas = 0                                       THEN 'Sin estado'
-    WHEN rp.n_bloqueo > 0 AND rp.n_enviadas > 0                 THEN 'Parcialmente enviado – bloqueo crédito'
     WHEN rp.n_bloqueo > 0                                       THEN 'Bloqueo crédito'
     WHEN rp.etapa_min = 5                                       THEN 'Enviado'
     WHEN rp.n_enviadas > 0                                      THEN 'Parcialmente enviado'
