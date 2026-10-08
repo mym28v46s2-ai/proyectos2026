@@ -72,6 +72,9 @@
 --   Recibido                 -> todas Recibido
 -- n_envios_pedido: envíos distintos con Salmer = 'S'. Un envío = Booking; si
 --   no hay Booking (camión) = Nombre_de_Nave + Inic_pl_transporte.
+-- Ultimo_inicio_viaje_pedido: fecha de inicio (Inic_pl_transporte) del último
+--   viaje del pedido, repetida en todas sus filas. NULL si ningún viaje tiene
+--   fecha.
 -- pct_m3_enviado_pedido: m3 Enviado / m3 de posiciones válidas (sobre
 --   Cta_ped_m3_b, fracción 0-1 para formato % en Looker).
 --
@@ -285,7 +288,11 @@ SELECT
     ELSE 'Recibido'
   END                                                           AS estado_pedido,
   rp.n_envios                                                   AS n_envios_pedido,
-  ROUND(rp.pct_m3_enviado, 4)                                   AS pct_m3_enviado_pedido
+  ROUND(rp.pct_m3_enviado, 4)                                   AS pct_m3_enviado_pedido,
+  MAX(COALESCE(
+        SAFE_CAST(d.Inic_pl_transporte AS DATE),
+        SAFE.PARSE_DATE('%Y%m%d', CAST(d.Inic_pl_transporte AS STRING))
+      )) OVER (PARTITION BY d.vbeln_join)                       AS Ultimo_inicio_viaje_pedido
 FROM detalle_posicion AS d
 LEFT JOIN resumen_pedido AS rp
   ON rp.vbeln_join = d.vbeln_join
