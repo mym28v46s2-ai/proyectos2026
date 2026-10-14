@@ -49,6 +49,10 @@ pedidos_base AS (
 
     vbpa_we.KUNNR                                           AS Codigo_Destinatario_Mercaderia,
     kna1_we.NAME1                                           AS Nombre_Destinatario_Mercaderia,
+    -- KNA1.MCOD2 (concepto de búsqueda 2) y KNA1.SORTL (concepto de
+    -- búsqueda / campo de clasificación) del destinatario de mercadería.
+    kna1_we.MCOD2                                           AS MCOD2_Destinatario_Mercaderia,
+    kna1_we.SORTL                                           AS SORTL_Destinatario_Mercaderia,
     kna1_we.REGIO                                           AS Region,
 
     vbpa_re.KUNNR                                           AS Codigo_Responsable_Factura,
@@ -715,6 +719,8 @@ SELECT
 
   p.Codigo_Destinatario_Mercaderia,
   p.Nombre_Destinatario_Mercaderia,
+  p.MCOD2_Destinatario_Mercaderia,
+  p.SORTL_Destinatario_Mercaderia,
 
   p.Codigo_Responsable_Factura,
   p.Nombre_Responsable_Factura,

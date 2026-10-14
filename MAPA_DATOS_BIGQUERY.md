@@ -74,7 +74,7 @@ updated: 2026-09-28
 | `vttk`/`vttp` | `sap_sd` | `TKNUM`, `VBELN` | Cabecera/posición de transporte — vincula entrega↔transporte |
 | `vbrk` | `sap_sd` | `VBELN`, `FKDAT`, `FKART`, `XBLNR` | Cabecera de factura |
 | `vbrp` | `sap_sd` | `VBELN`, `AUBEL`, `VGBEL` | Posición de factura — `AUBEL`=pedido de origen, `VGBEL`=documento anterior inmediato |
-| `kna1` | `sap_sd` | `KUNNR`, `NAME1`, `REGIO` | Maestro de clientes |
+| `kna1` | `sap_sd` | `KUNNR`, `NAME1`, `REGIO`, `MCOD2`, `SORTL` | Maestro de clientes. `MCOD2`/`SORTL` (conceptos de búsqueda) agregados en `Ventas_Nac` para el destinatario `WE` (2026-10-14), no verificados con `INFORMATION_SCHEMA` |
 | `tvgrt`/`tvtwt`/`tspat`/`tvlst` | `sap_sd` | texto + `SPRAS` | Tablas de texto: grupo vendedores / canal / sector / bloqueo de entrega |
 | `t005t` | `sap_sd` | `LAND1`, `SPRAS`, `LANDX` | Texto de país |
 | `vfkp` | `sap_sd` | `FKNUM`, `FKPOS`, `FKPTY`, `EBELN`, `EBELP`, `LBLNI`, `TDLNR`, `NETWR`, `WAERS`, `STBER`/`STABR`/`STFRE` | Posiciones de gastos de transporte (`FKPTY='ZE18'`=consolidador) |
