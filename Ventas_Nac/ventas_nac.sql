@@ -925,7 +925,12 @@ cumplimiento_cabecera AS (
     MAX(max_kg)                                                         AS max_kg_pedido,
     SUM(COALESCE(Cantidad_Despachada, 0))                               AS Unidades_Entregadas_Pedido,
     SUM(Cantidad_Venta)                                                 AS Unidades_Comprometidas_Pedido,
-    LOGICAL_OR(Categoria_Cumplimiento IN ('Cumplido con atraso', 'Atrasado en curso')) AS Tiene_Atraso_Pedido
+    LOGICAL_OR(Categoria_Cumplimiento IN ('Cumplido con atraso', 'Atrasado en curso')) AS Tiene_Atraso_Pedido,
+    -- Insumos de Estado_Envio_Cabecera (SELECT final).
+    COUNT(*)                                                            AS n_posiciones_envio,
+    COUNTIF(Estado_Envio = 'Despachado')                                AS n_posiciones_despachadas,
+    LOGICAL_OR(Estado_Envio = 'Cliente retira')                         AS Tiene_Cliente_Retira,
+    LOGICAL_OR(Estado_Envio = 'Planificado')                            AS Tiene_Planificado
   FROM resultado_base
   GROUP BY ID_Documento
 ),
@@ -998,6 +1003,23 @@ SELECT
       THEN 'Cumplido con atraso'
     ELSE 'Cumplido'
   END                                                                AS Categoria_Cumplimiento_Cabecera,
+  -- Estado_Envio_Cabecera: resume Estado_Envio de todas las posiciones
+  -- del pedido (repetido en cada posición). Se cuenta por posiciones
+  -- (una posición con cualquier despacho cuenta como despachada, sin
+  -- mirar cantidad) e incluye todas las posiciones, también las con
+  -- motivo de rechazo. Orden de evaluación:
+  --   todas 'Despachado'                      -> 'Despachado total'
+  --   alguna 'Despachado'                     -> 'Despachado parcial'
+  --   ninguna despachada, incoterm CCR/CIR    -> 'Cliente retira'
+  --   ninguna despachada, alguna con entrega  -> 'Planificado'
+  --   ninguna con entrega creada              -> 'No planificado'
+  CASE
+    WHEN cc.n_posiciones_despachadas = cc.n_posiciones_envio THEN 'Despachado total'
+    WHEN cc.n_posiciones_despachadas > 0                     THEN 'Despachado parcial'
+    WHEN cc.Tiene_Cliente_Retira                             THEN 'Cliente retira'
+    WHEN cc.Tiene_Planificado                                THEN 'Planificado'
+    ELSE 'No planificado'
+  END                                                                AS Estado_Envio_Cabecera,
   -- Ocupación del camión a nivel pedido: M3_pedido / max_vol de la
   -- clase de camión asignada (1 = camión lleno, > 1 = excede la
   -- capacidad). Valor repetido en todas las posiciones del pedido;
