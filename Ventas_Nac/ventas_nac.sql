@@ -983,6 +983,87 @@ repaqueteo_pedido AS (
     )                                                                   AS Pct_Repaqueteo_Pedido
   FROM base_repaqueteo
   GROUP BY ID_Documento
+),
+
+
+-- ============================================================
+-- CTE 14D: ANÁLISIS DE TAMAÑO DE PAQUETE POR MATERIAL
+-- Sobre las posiciones del universo de repaqueteo (todo el período de
+-- la consulta), por material:
+--   Cantidad_Mas_Frecuente: cantidad pedida que más se repite (empate
+--     -> la mayor cantidad).
+--   Pct_Multiplo_Paquete_Actual: % de posiciones múltiplo exacto del
+--     paquete actual (= 1 - % de repaqueteo).
+--   Paquete_Sugerido: mayor tamaño k entre 1 y el paquete actual tal
+--     que >= 80% de las posiciones serían múltiplo exacto de k. NULL si
+--     ningún k llega al 80% (ej. cantidades no enteras).
+-- ============================================================
+cantidades_material AS (
+  SELECT
+    Material,
+    CAST(MAX(Unidades_por_Paquete) AS NUMERIC)                          AS Unidades_por_Paquete,
+    CAST(Cantidad_Venta AS NUMERIC)                                     AS Cantidad,
+    COUNT(*)                                                            AS n_posiciones
+  FROM base_repaqueteo
+  WHERE En_Universo_Repaqueteo
+  GROUP BY Material, Cantidad
+),
+totales_material AS (
+  SELECT
+    Material,
+    MAX(Unidades_por_Paquete)                                           AS Unidades_por_Paquete,
+    SUM(n_posiciones)                                                   AS Posiciones_Evaluadas_Material,
+    SUM(IF(MOD(Cantidad, Unidades_por_Paquete) = 0, n_posiciones, 0))   AS n_multiplo_actual
+  FROM cantidades_material
+  GROUP BY Material
+),
+cantidad_frecuente_material AS (
+  SELECT
+    Material,
+    Cantidad                                                            AS Cantidad_Mas_Frecuente,
+    n_posiciones                                                        AS n_cantidad_mas_frecuente
+  FROM cantidades_material
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY Material ORDER BY n_posiciones DESC, Cantidad DESC) = 1
+),
+-- Simulación: cada tamaño candidato k (1..paquete actual) contra las
+-- cantidades vendidas del material.
+cobertura_candidatos AS (
+  SELECT
+    t.Material,
+    k                                                                   AS Paquete_Candidato,
+    SAFE_DIVIDE(
+      SUM(IF(MOD(c.Cantidad, CAST(k AS NUMERIC)) = 0, c.n_posiciones, 0)),
+      t.Posiciones_Evaluadas_Material
+    )                                                                   AS Pct_Multiplo
+  FROM totales_material AS t
+  CROSS JOIN UNNEST(GENERATE_ARRAY(1, CAST(FLOOR(t.Unidades_por_Paquete) AS INT64))) AS k
+  INNER JOIN cantidades_material AS c
+    ON c.Material = t.Material
+  GROUP BY t.Material, k, t.Posiciones_Evaluadas_Material
+),
+paquete_sugerido_material AS (
+  SELECT
+    Material,
+    Paquete_Candidato                                                   AS Paquete_Sugerido,
+    Pct_Multiplo                                                        AS Pct_Multiplo_Paquete_Sugerido
+  FROM cobertura_candidatos
+  WHERE Pct_Multiplo >= 0.8
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY Material ORDER BY Paquete_Candidato DESC) = 1
+),
+analisis_paquete_material AS (
+  SELECT
+    t.Material,
+    t.Posiciones_Evaluadas_Material,
+    cf.Cantidad_Mas_Frecuente,
+    ROUND(SAFE_DIVIDE(cf.n_cantidad_mas_frecuente, t.Posiciones_Evaluadas_Material), 4) AS Pct_Cantidad_Mas_Frecuente,
+    ROUND(SAFE_DIVIDE(t.n_multiplo_actual, t.Posiciones_Evaluadas_Material), 4)         AS Pct_Multiplo_Paquete_Actual,
+    ps.Paquete_Sugerido,
+    ROUND(ps.Pct_Multiplo_Paquete_Sugerido, 4)                          AS Pct_Multiplo_Paquete_Sugerido
+  FROM totales_material AS t
+  LEFT JOIN cantidad_frecuente_material AS cf
+    ON cf.Material = t.Material
+  LEFT JOIN paquete_sugerido_material AS ps
+    ON ps.Material = t.Material
 )
 
 
@@ -1124,6 +1205,24 @@ SELECT
   -- 1 = requiere repaqueteo; 0 = no requiere (estándar o fuera del
   -- universo evaluado). El denominador incluye todas las posiciones.
   IF(rb.En_Universo_Repaqueteo AND rb.Resto_Cantidad_Paquete != 0, 1, 0) AS Flag_Repaqueteo,
+  -- Relación cantidad vs paquete (solo universo de repaqueteo):
+  -- 'Múltiplo exacto' (20/40 de 20), 'Menor a 1 paquete' (7/10 de 20),
+  -- 'Paquetes + sueltas' (47 de 20).
+  CASE
+    WHEN NOT rb.En_Universo_Repaqueteo                     THEN NULL
+    WHEN rb.Resto_Cantidad_Paquete = 0                     THEN 'Múltiplo exacto'
+    WHEN rb.Cantidad_Venta < rb.Unidades_por_Paquete       THEN 'Menor a 1 paquete'
+    ELSE 'Paquetes + sueltas'
+  END                                                                AS Tipo_Cantidad_vs_Paquete,
+  -- Análisis de tamaño de paquete por material (CTE 14D), repetido en
+  -- cada posición del universo; NULL fuera de él. En Looker usar MAX
+  -- por material.
+  apm.Posiciones_Evaluadas_Material,
+  apm.Cantidad_Mas_Frecuente,
+  apm.Pct_Cantidad_Mas_Frecuente,
+  apm.Pct_Multiplo_Paquete_Actual,
+  apm.Paquete_Sugerido,
+  apm.Pct_Multiplo_Paquete_Sugerido,
   -- Evaluación a nivel pedido (repetida en cada posición). Ver CTE 14C.
   rp.Posiciones_Repaqueteo_Pedido,
   rp.Posiciones_Pedido,
@@ -1161,3 +1260,6 @@ LEFT JOIN cumplimiento_cabecera AS cc
   ON cc.ID_Documento = rb.ID_Documento
 LEFT JOIN repaqueteo_pedido AS rp
   ON rp.ID_Documento = rb.ID_Documento
+LEFT JOIN analisis_paquete_material AS apm
+  ON  apm.Material = rb.Material
+  AND rb.En_Universo_Repaqueteo
