@@ -941,6 +941,11 @@ cumplimiento_cabecera AS (
 -- Universo: tableros (nivel_2_familia 'Aglomerado'/'MDF' y
 -- nivel_3_subfamilia 'Recubierto'/'Desnudo') vendidos en piezas
 -- (UM_Venta='ST') con paquete estándar en MARM (PAK, ver CTE 2B).
+-- Se excluyen los pedidos de los canales de distribución '15' y '19'
+-- (VBAK.VTWEG = Canal_Distribucion; VBCOM es una estructura SAP de
+-- comunicación, no una tabla replicada — el canal viene de VBAK, que es
+-- su origen). Esas posiciones quedan con Aplica_Repaqueteo='N',
+-- Flag_Repaqueteo=0 y fuera del análisis de paquete por material.
 -- Regla (aplicada en el SELECT final): la posición es estándar solo si
 -- la cantidad es múltiplo exacto de las piezas por paquete (40 de 20 =
 -- 2 paquetes); si no, hay que armar un paquete especial -> repaqueteo
@@ -956,7 +961,8 @@ base_repaqueteo AS (
       AND UPPER(TRIM(nivel_3_subfamilia)) IN ('RECUBIERTO', 'DESNUDO')
       AND UM_Venta = 'ST'
       AND Unidades_por_Paquete > 0
-      AND Cantidad_Venta > 0,
+      AND Cantidad_Venta > 0
+      AND COALESCE(Canal_Distribucion, '') NOT IN ('15', '19'),
       FALSE
     )                                                                   AS En_Universo_Repaqueteo,
     MOD(CAST(Cantidad_Venta AS NUMERIC), CAST(NULLIF(Unidades_por_Paquete, 0) AS NUMERIC)) AS Resto_Cantidad_Paquete
