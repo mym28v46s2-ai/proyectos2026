@@ -46,6 +46,7 @@ pedidos_base AS (
     vbap.VRKME                                              AS UM_Venta,
     vbap.NETWR                                              AS Valor_Neto_Doc,
     vbap.ABGRU                                              AS Motivo_Rechazo,
+    vbap.WERKS                                              AS Centro_VBAP,
 
     vbpa_we.KUNNR                                           AS Codigo_Destinatario_Mercaderia,
     kna1_we.NAME1                                           AS Nombre_Destinatario_Mercaderia,
@@ -741,6 +742,9 @@ SELECT
   -- zona y del mapeo zona->centro.
   p.Zona_Logistica,
   p.Centro_Abastecedor,
+  -- Centro real de la posición en SAP (VBAP.WERKS), valor crudo. Solo
+  -- referencia: Centro_Abastecedor sigue derivándose de la región.
+  p.Centro_VBAP,
   -- Clase de camión asignada según el centro abastecedor, con su
   -- capacidad máxima en volumen (m3) y peso (kg):
   --   TCDS      -> clase '21': 17 m3 / 16.000 kg
