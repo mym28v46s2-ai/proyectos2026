@@ -63,7 +63,7 @@ updated: 2026-09-28
 | Tabla | Dataset | Campos clave usados | Uso |
 |---|---|---|---|
 | `vbak` | `sap_sd` | `VBELN`, `AUART`, `VKORG`, `ERDAT`, `GWLDT`, `BSTNK`, `VDATU`, `LIFSK`, `SPART`, `VTWEG`, `VKGRP` | Cabecera de pedido de venta |
-| `vbap` | `sap_sd` | `VBELN`, `POSNR`, `MATNR`, `KWMENG`, `VRKME`, `NETWR`, `ABGRU` | Posición de pedido |
+| `vbap` | `sap_sd` | `VBELN`, `POSNR`, `MATNR`, `KWMENG`, `VRKME`, `NETWR`, `ABGRU`, `WERKS` | Posición de pedido. `WERKS` = centro de la posición (confirmado en BQ 2026-10-19; ZPN/CL11 2026: TCDC 70,6%, TCDS 29,2%, TCD4 0,2%, resto TCP1/TCP7/TCP5/TCD2 <0,2%) |
 | `vbep` | `sap_sd` | `VBELN`, `POSNR`, `ETENR`, `EDATU` | Líneas de programación — `ETENR` más bajo = "1era Fecha" (equiv. `RV45A-ETDAT`) |
 | `vbuk` | `sap_sd` | `VBELN`, `CMGST`, `WBSTK` | Estado de cabecera: status de crédito y estado de movimiento de mercancía |
 | `vbpa` | `sap_sd` | `VBELN`, `POSNR`, `PARVW`, `KUNNR` | Interlocutores. `PARVW='WE'`=destinatario mercadería, `'RE'`=responsable de factura (siempre a nivel cabecera, `POSNR='000000'`) |
