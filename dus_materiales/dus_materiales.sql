@@ -1,5 +1,6 @@
 -- =============================================================================
 -- dus_materiales — DUS1 enriquecido con clasificación de materiales (N2..N5)
+-- y país de destino (zsd_t_export.bezei, cruzado por pedido vbeln)
 --
 -- Salida: `aecorsoft.Procesos_CDS.dus_materiales` (particionada por etd_fecha,
 -- cluster por matnr). Se actualiza diariamente.
@@ -12,7 +13,7 @@ CREATE OR REPLACE TABLE `aecorsoft.Procesos_CDS.dus_materiales`
 PARTITION BY etd_fecha
 CLUSTER BY matnr
 OPTIONS (
-  description = 'DUS1 con datos de materiales (N2-N5). Ventana: mes anterior, actual y próximo según etd. Se actualiza diariamente.'
+  description = 'DUS1 con datos de materiales (N2-N5) y país de destino. Ventana: mes anterior, actual y próximo según etd. Se actualiza diariamente.'
 )
 AS
 WITH materiales AS (
@@ -44,6 +45,20 @@ dus AS (
       SAFE.PARSE_DATE('%Y%m%d', CAST(etd AS STRING))
     ) AS etd_fecha
   FROM `aecorsoft.sap_sd.zsd_t_dus1`
+),
+
+-- País de destino por pedido desde zsd_t_export. Se deja 1 fila por vbeln
+-- (el bezei no vacío más frecuente) para no duplicar filas de DUS1.
+pais_destino AS (
+  SELECT
+    exp.vbeln,
+    NULLIF(TRIM(exp.bezei), '') AS Pais_Destino
+  FROM `aecorsoft.sap_sd.zsd_t_export` AS exp
+  GROUP BY 1, 2
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY exp.vbeln
+    ORDER BY Pais_Destino IS NULL, COUNT(*) DESC, Pais_Destino
+  ) = 1
 )
 
 SELECT
@@ -52,9 +67,12 @@ SELECT
   m.N3,
   m.N4,
   m.N5,
+  p.Pais_Destino,
   CURRENT_TIMESTAMP() AS fecha_actualizacion
 FROM dus AS d
 LEFT JOIN materiales AS m
   ON d.matnr = m.MATNR
+LEFT JOIN pais_destino AS p
+  ON d.vbeln = p.vbeln
 WHERE d.etd_fecha >= DATE_TRUNC(DATE_SUB(CURRENT_DATE('America/Santiago'), INTERVAL 1 MONTH), MONTH)  -- 1° del mes anterior
   AND d.etd_fecha <  DATE_TRUNC(DATE_ADD(CURRENT_DATE('America/Santiago'), INTERVAL 2 MONTH), MONTH); -- 1° del mes subsiguiente (excluido)
