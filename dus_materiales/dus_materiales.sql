@@ -1,6 +1,6 @@
 -- =============================================================================
 -- dus_materiales — DUS1 enriquecido con clasificación de materiales (N2..N5)
--- y país de destino (zsd_t_export.bezei, cruzado por pedido vbeln)
+-- y país de destino (zsd_t_export.bezei, cruzado por pedido: dus1.pedido = export.vbeln)
 --
 -- Salida: `aecorsoft.Procesos_CDS.dus_materiales` (particionada por etd_fecha,
 -- cluster por matnr). Se actualiza diariamente.
@@ -47,16 +47,18 @@ dus AS (
   FROM `aecorsoft.sap_sd.zsd_t_dus1`
 ),
 
--- País de destino por pedido desde zsd_t_export. Se deja 1 fila por vbeln
+-- País de destino por pedido desde zsd_t_export. Se deja 1 fila por pedido
 -- (el bezei no vacío más frecuente) para no duplicar filas de DUS1.
+-- El pedido está en export.vbeln y en dus1.pedido (no en dus1.vbeln); se
+-- normalizan ceros a la izquierda y espacios en ambos lados.
 pais_destino AS (
   SELECT
-    exp.vbeln,
+    LTRIM(TRIM(exp.vbeln), '0') AS pedido_norm,
     NULLIF(TRIM(exp.bezei), '') AS Pais_Destino
   FROM `aecorsoft.sap_sd.zsd_t_export` AS exp
   GROUP BY 1, 2
   QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY exp.vbeln
+    PARTITION BY pedido_norm
     ORDER BY Pais_Destino IS NULL, COUNT(*) DESC, Pais_Destino
   ) = 1
 )
@@ -73,6 +75,6 @@ FROM dus AS d
 LEFT JOIN materiales AS m
   ON d.matnr = m.MATNR
 LEFT JOIN pais_destino AS p
-  ON d.vbeln = p.vbeln
+  ON LTRIM(TRIM(d.pedido), '0') = p.pedido_norm
 WHERE d.etd_fecha >= DATE_TRUNC(DATE_SUB(CURRENT_DATE('America/Santiago'), INTERVAL 1 MONTH), MONTH)  -- 1° del mes anterior
   AND d.etd_fecha <  DATE_TRUNC(DATE_ADD(CURRENT_DATE('America/Santiago'), INTERVAL 2 MONTH), MONTH); -- 1° del mes subsiguiente (excluido)
