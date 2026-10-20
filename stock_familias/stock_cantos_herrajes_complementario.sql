@@ -5,7 +5,8 @@
 -- Ventas_Nac/ventas_nac.sql (MARD.LABST por centro TCDS/TCDC/TCD4, TCD2
 -- excluido, V111/V112 excluidos), administrado en unidad de medida base
 -- (UMB, MARA.MEINS), sin conversión a m3.
--- Se excluyen los materiales obsoletos (stock_pedido='D') sin stock logístico.
+-- Se excluyen del resultado los materiales obsoletos (stock_pedido='D') y los
+-- materiales sin stock logístico (UN_Disponible_Logistica = 0).
 -- Clasificación: sap_mm.ZRC_MM_REPORTE_MATERIALES (N2..N5), sin respaldo.
 -- Materiales que no están en ZRC quedan con niveles NULL. Diagnóstico
 -- 2026-10-20: ZRC cubre 990 de 991 Z903 con stock logístico.
@@ -141,7 +142,8 @@ resultado_base AS (
 
 SELECT *
 FROM resultado_base
--- Excluye obsoletos (stock_pedido='D') sin stock logístico. Un 'D' con
--- stock se mantiene; stock_pedido NULL se trata como no obsoleto.
-WHERE NOT (COALESCE(stock_pedido, '') = 'D' AND UN_Disponible_Logistica = 0)
+-- Excluye del resultado: obsoletos (stock_pedido='D'), tengan o no stock,
+-- y materiales sin stock logístico. stock_pedido NULL no se trata como 'D'.
+WHERE COALESCE(stock_pedido, '') != 'D'
+  AND UN_Disponible_Logistica > 0
 ORDER BY Nivel_2, Nivel_3, Nivel_4, Nivel_5, Material;
