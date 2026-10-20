@@ -3,30 +3,13 @@
 -- 'Term. Cantos', 'Herrajes', 'Complementario'.
 -- Lógica de stock: la misma del CTE stock_disponible de Ventas_Nac/ventas_nac.sql
 -- (MARD.LABST, segmentado en zona traspaso / operaciones / logística por centro,
--- TCD2 excluido, V111/V112 excluidos de logística), expresado solo en unidad
--- base (MARA.MEINS), sin conversión a m3.
+-- TCD2 excluido, V111/V112 excluidos de logística), administrado en unidad de
+-- medida base (UMB, MARA.MEINS), sin conversión a m3.
 -- Jerarquía Gescorp vía CABN/AUSP/CAWN/CAWNT (KLART='001'), mismo patrón que
 -- Ventas_Nac / fillrate_etapa2.
 -- =============================================================================
 
 WITH
-
--- ============================================================
--- DIMENSIONES FÍSICAS DEL MATERIAL (MARA)
--- Normaliza volumen a M3 desde CDM (dm³) o CM3 (cm³) — copia de
--- Ventas_Nac (CTE 2), sin las columnas de peso.
--- ============================================================
-dimensiones AS (
-  SELECT
-    MATNR,
-    MEINS,
-    CASE VOLEH
-      WHEN 'CDM' THEN COALESCE(VOLUM, 0) / 1000.0
-      WHEN 'CM3' THEN COALESCE(VOLUM, 0) / 1000000.0
-      ELSE             COALESCE(VOLUM, 0)
-    END AS volumen_unidad_m3
-  FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mara`
-),
 
 -- ============================================================
 -- CLASIFICACIÓN DE MATERIALES (SKU) — jerarquía Gescorp
@@ -122,8 +105,7 @@ SELECT
   mf.nivel_3_subfamilia,
   st.Material,
   makt.MAKTX                                                             AS descripcion_material,
-  d.MEINS                                                                AS UM_Base,
-  d.volumen_unidad_m3,
+  mara.MEINS                                                             AS UM_Base,
 
   st.un_libres_zonatraspaso,
   st.un_libres_operaciones,
@@ -131,13 +113,13 @@ SELECT
   st.un_logistica_tcdc,
   st.un_logistica_tcd4,
   -- Suma de los 3 centros logísticos (no incluye zonatraspaso/operaciones),
-  -- mismo criterio que M3_Disponible_Logistica en Ventas_Nac.
+  -- mismo criterio de disponible logístico que Ventas_Nac.
   st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4     AS UN_Disponible_Logistica
 FROM stock_disponible AS st
 INNER JOIN materiales_familia AS mf
   ON mf.Material = st.Material
-LEFT JOIN dimensiones AS d
-  ON d.MATNR = st.Material
+LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.mara` AS mara
+  ON mara.MATNR = st.Material
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.makt` AS makt
   ON  makt.MATNR = st.Material
   AND makt.SPRAS = 'S'
