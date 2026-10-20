@@ -24,7 +24,7 @@ updated: 2026-09-28
 | Dataset | Contenido | Notas |
 |---|---|---|
 | `cdc_produccion_pp_cp50_01_new` | Maestro de materiales y stock: `mara`, `makt`, `marc`, `marm`, `mard`, `mcha`, `mseg_full`, `mkpf`, `cabn`, `ausp`, `cawn`, `cawnt`. También `mchb` (asumida, aún sin confirmar) | El nombre "cp50_01" no es intuitivo — es el dataset "grande" de datos de producción/materiales |
-| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
+| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `mvke`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
@@ -77,6 +77,7 @@ updated: 2026-09-28
 | `kna1` | `sap_sd` | `KUNNR`, `NAME1`, `REGIO`, `MCOD2`, `SORTL` | Maestro de clientes. `MCOD2`/`SORTL` (conceptos de búsqueda) agregados en `Ventas_Nac` para el destinatario `WE` (2026-10-14), no verificados con `INFORMATION_SCHEMA` |
 | `tvgrt`/`tvtwt`/`tspat`/`tvlst` | `sap_sd` | texto + `SPRAS` | Tablas de texto: grupo vendedores / canal / sector / bloqueo de entrega |
 | `t005t` | `sap_sd` | `LAND1`, `SPRAS`, `LANDX` | Texto de país |
+| `mvke` | `sap_sd` | `MATNR`, `VKORG`, `VTWEG`, `AUMNG` | Datos de ventas del material por área de ventas (sin centro). `AUMNG` = cantidad mínima de pedido en UMB. Dataset confirmado por el usuario (2026-10-20), columnas no verificadas con `INFORMATION_SCHEMA`. Usado en `stock_familias` (CL11 / canal 84) |
 | `vfkp` | `sap_sd` | `FKNUM`, `FKPOS`, `FKPTY`, `EBELN`, `EBELP`, `LBLNI`, `TDLNR`, `NETWR`, `WAERS`, `STBER`/`STABR`/`STFRE` | Posiciones de gastos de transporte (`FKPTY='ZE18'`=consolidador) |
 
 ### 2.3 Compras / MM (orden de servicio)

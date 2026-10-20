@@ -98,6 +98,23 @@ stock_disponible AS (
   INNER JOIN materiales_familia AS mf ON mf.Material = mard.MATNR
   WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
   GROUP BY 1
+),
+
+-- ============================================================
+-- CANTIDAD MÍNIMA DE PEDIDO (MVKE.AUMNG), en UMB.
+-- MVKE no tiene centro (clave MATNR + VKORG + VTWEG): se toma el
+-- área de ventas CL11 / canal 84, que es la que abastece TCDC.
+-- Dataset sap_sd confirmado por el usuario (2026-10-20).
+-- MAX por si la réplica trae duplicados de la clave.
+-- ============================================================
+cantidad_minima_pedido AS (
+  SELECT
+    MATNR                                                  AS Material,
+    MAX(AUMNG)                                             AS AUMNG
+  FROM `aecorsoft.sap_sd.mvke`
+  WHERE VKORG = 'CL11'
+    AND VTWEG = '84'
+  GROUP BY MATNR
 )
 
 SELECT
@@ -106,6 +123,8 @@ SELECT
   st.Material,
   makt.MAKTX                                                             AS descripcion_material,
   mara.MEINS                                                             AS UM_Base,
+  -- Cantidad mínima de pedido TCDC (MVKE.AUMNG, CL11 / canal 84), en UMB.
+  cmp.AUMNG                                                              AS Cant_Min_Pedido_TCDC,
 
   st.un_libres_zonatraspaso,
   st.un_libres_operaciones,
@@ -123,6 +142,8 @@ LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.mara` AS mara
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.makt` AS makt
   ON  makt.MATNR = st.Material
   AND makt.SPRAS = 'S'
+LEFT JOIN cantidad_minima_pedido AS cmp
+  ON cmp.Material = st.Material
 -- Solo materiales con algún stock en las cubetas consideradas.
 WHERE st.un_libres_zonatraspaso + st.un_libres_operaciones
     + st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4 > 0
