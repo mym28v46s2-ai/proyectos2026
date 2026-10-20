@@ -174,6 +174,62 @@ crudo (`cod_nivel_*`) si no hay descripción traducida. Origen confirmado en
 `fillrate_etapa2/llenado_capacidad.sql`; reutilizado literal en `prov_inventarios`,
 `ventas_cl`, `ventas_stocks_ventas`, `log_asignacion_optima`.
 
+#### 3.3.1 Alternativa: `sap_mm.ZRC_MM_REPORTE_MATERIALES` (niveles ya traducidos)
+
+Reporte Z de maestro de materiales que trae la clasificación **ya en texto**, sin pasar
+por `CABN`/`AUSP`/`CAWN`/`CAWNT`. Validado contra Gescorp el 2026-10-20 (3 materiales
+Z903 de ejemplo, ver `stock_familias`):
+
+| Columna ZRC | Equivale a | Ejemplo (canto PVC, `MATNR` 208084) |
+|---|---|---|
+| `N1` | — (no existe en Gescorp) | `Solución Productos Terceros` |
+| `N2` | descripción de `RG_FAMILIA` (nivel 2) | `Termin. Cantos` |
+| `N3` | descripción de `RG_SUBFAMILIA` (nivel 3) | `Terminaciones de Cantos` |
+| `N4` | descripción de `RG_MARCA` (nivel 4) | `Tapacanto PVC` |
+| `N5` | — (nivel más fino, no existe en Gescorp) | `Tapacanto PVC Blanco` |
+
+Casos particulares (diagnósticos 2026-10-20):
+
+- **Filas repetidas:** ~9,9 M filas para 342.693 materiales (~29 por material). En los
+  ejemplos las 29 filas son idénticas (`IDNRK`/`OJTXP` vacíos), causa no identificada.
+  Siempre agrupar a 1 fila por material.
+- **Niveles en conflicto:** 16.976 materiales (~5%) tienen N2/N3 distintos entre filas.
+  `MAX` por columna puede mezclar niveles de filas distintas y elige el último
+  alfabéticamente — preferir la **combinación N2..N5 más frecuente** (patrón abajo).
+- **Ceros a la izquierda:** `MARA.MATNR` los trae (12.553 de 12.577 Z903); normalizar
+  **ambos lados** con `LTRIM(TRIM(MATNR), '0')` al cruzar.
+- **Cobertura parcial:** de los Z903, solo 4.052/12.577 están en ZRC; pero de los Z903
+  **con stock logístico** están 990/991 (Gescorp: 991/991). Para universos que incluyan
+  materiales sin stock, usar Gescorp como respaldo para N2..N4.
+- **Niveles en blanco:** convertir `''` a `NULL` (`NULLIF(TRIM(Nx), '')`) para que el
+  `COALESCE` con Gescorp funcione.
+
+Patrón recomendado (de `stock_familias/stock_cantos_herrajes_complementario.sql`):
+
+```sql
+clasificacion_zrc AS (
+  SELECT
+    LTRIM(TRIM(MATNR), '0')  AS matnr_norm,
+    NULLIF(TRIM(N2), '')     AS nivel_2,
+    NULLIF(TRIM(N3), '')     AS nivel_3,
+    NULLIF(TRIM(N4), '')     AS nivel_4,
+    NULLIF(TRIM(N5), '')     AS nivel_5
+  FROM `aecorsoft.sap_mm.ZRC_MM_REPORTE_MATERIALES`
+  -- (opcional) acotar al universo: WHERE LTRIM(TRIM(MATNR), '0') IN (...)
+  GROUP BY 1, 2, 3, 4, 5
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY matnr_norm
+    ORDER BY COUNT(*) DESC, nivel_2, nivel_3, nivel_4, nivel_5
+  ) = 1
+)
+-- Cruce:  ON zrc.matnr_norm = LTRIM(TRIM(<tabla>.MATNR), '0')
+-- Niveles: COALESCE(zrc.nivel_2, <descripción Gescorp RG_FAMILIA>, <código crudo>)
+-- Auditoría: columna origen_clasificacion = 'ZRC' / 'Gescorp' / 'Sin clasificación'
+```
+
+Columnas de ZRC aún **sin interpretar** (no usar sin validar): `MTART2`, `PERFIL`,
+`TERMIN`, `V1`..`V7`, `PZATADO`, `ATADPAK`, `PZAPAK`, `PLASTIF`, `EMPAQ`, `M3`.
+
 ### 3.4 Centros (`WERKS`) y almacenes (`LGORT`)
 
 | Centro | Rol | Almacenes de daño (`V111`/`V112` + extras) |
@@ -300,6 +356,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `log_fillrate_lotesabajo` | Fill rate desde exports Excel (`vbak`/`vbap`/`mara`/`marm`/`likp`/`lips`/`vttp`/`vttk`/`vekp`/`vepo`) | (Excel, no BQ directo) | — | sin `CLAUDE.md` propio |
 | `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver nota de memoria `project_lineas_activas`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
 | `comex_facturacion` | Tiempo embarque→factura | `likp`/`vbfa`/`vbrk` (Excel) | `resultado_tiempo_embarque_factura.xlsx` | sin `CLAUDE.md` propio |
+| `stock_familias` | Stock logístico (UMB) de materiales Z903 con clasificación N2..N5, `stock_pedido` y cantidad mínima de pedido | `mara`/`mard`/`marc`/`makt`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` (+ Gescorp de respaldo) | `stock_cantos_herrajes_complementario.sql` | — (sin `CLAUDE.md` propio) |
 | `papeles_hugo` | Exploratorio — origen de `sap_sd.t005t` | `t005t` | — | sin `CLAUDE.md` propio |
 
 ## 7. Huecos de replicación conocidos (no perder tiempo re-descubriéndolos)
