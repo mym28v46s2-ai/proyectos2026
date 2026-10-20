@@ -6,7 +6,8 @@
 -- excluido, V111/V112 excluidos), administrado en unidad de medida base
 -- (UMB, MARA.MEINS), sin conversión a m3.
 -- Se excluyen del resultado los materiales obsoletos (stock_pedido='D') y los
--- materiales sin stock logístico (UN_Disponible_Logistica = 0).
+-- materiales sin stock logístico, salvo los P/S (a pedido / a stock), que se
+-- mantienen sin stock para cruzarlos con pronósticos.
 -- Clasificación: sap_mm.ZRC_MM_REPORTE_MATERIALES (N2..N5), sin respaldo.
 -- Materiales que no están en ZRC quedan con niveles NULL. Diagnóstico
 -- 2026-10-20: ZRC cubre 990 de 991 Z903 con stock logístico.
@@ -142,8 +143,12 @@ resultado_base AS (
 
 SELECT *
 FROM resultado_base
--- Excluye del resultado: obsoletos (stock_pedido='D'), tengan o no stock,
--- y materiales sin stock logístico. stock_pedido NULL no se trata como 'D'.
-WHERE COALESCE(stock_pedido, '') != 'D'
-  AND UN_Disponible_Logistica > 0
+-- Excluye del resultado:
+--   - obsoletos (stock_pedido='D'), tengan o no stock;
+--   - materiales sin stock logístico, salvo stock_pedido 'P'/'S', que se
+--     mantienen aunque estén en 0 (insumo para pronósticos). Blanco, NULL,
+--     espacios u otros códigos sin stock quedan fuera.
+WHERE COALESCE(TRIM(stock_pedido), '') != 'D'
+  AND (UN_Disponible_Logistica > 0
+       OR TRIM(stock_pedido) IN ('P', 'S'))
 ORDER BY Nivel_2, Nivel_3, Nivel_4, Nivel_5, Material;
