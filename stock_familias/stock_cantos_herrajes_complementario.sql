@@ -3,9 +3,8 @@
 -- 'Term. Cantos', 'Herrajes', 'Complementario'.
 -- Lógica de stock: la misma del CTE stock_disponible de Ventas_Nac/ventas_nac.sql
 -- (MARD.LABST, segmentado en zona traspaso / operaciones / logística por centro,
--- TCD2 excluido, V111/V112 excluidos de logística). Además de los m3 se exponen
--- las mismas cubetas en unidad base (MARA.MEINS): en herrajes/complementarios es
--- común que MARA.VOLUM venga vacío y el stock en m3 quede en 0.
+-- TCD2 excluido, V111/V112 excluidos de logística), expresado solo en unidad
+-- base (MARA.MEINS), sin conversión a m3.
 -- Jerarquía Gescorp vía CABN/AUSP/CAWN/CAWNT (KLART='001'), mismo patrón que
 -- Ventas_Nac / fillrate_etapa2.
 -- =============================================================================
@@ -86,12 +85,11 @@ materiales_familia AS (
 -- especial TCP7 con LGORT V001/V004. TCD2 se excluye por completo
 -- (error de copia conocido, no representa stock real). V111/V112
 -- (almacenes de daño) se excluyen en los 3 centros logísticos.
--- Las columnas *_un repiten las mismas cubetas en unidad base.
+-- Cantidades en unidad base (MARA.MEINS).
 -- ============================================================
 stock_disponible AS (
   SELECT
     mard.MATNR                                             AS Material,
-    -- Unidad base (MARA.MEINS)
     SUM(IF(
       mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PPT%',
       mard.LABST, 0
@@ -112,32 +110,9 @@ stock_disponible AS (
     SUM(IF(
       mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
       mard.LABST, 0
-    ))                                                     AS un_logistica_tcd4,
-    -- M3 (copia literal de Ventas_Nac)
-    ROUND(SUM(IF(
-      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PPT%',
-      mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_libres_zonatraspaso,
-    ROUND(SUM(IF(
-      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PAP%',
-      mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_libres_operaciones,
-    ROUND(SUM(IF(
-      mard.WERKS = 'TCDS' AND mard.LGORT NOT IN ('V111','V112'),
-      mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_logistica_tcds,
-    ROUND(SUM(IF(
-      (mard.WERKS = 'TCDC' AND mard.LGORT NOT IN ('V111','V112'))
-        OR (mard.WERKS = 'TCP7' AND mard.LGORT IN ('V001', 'V004')),
-      mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_logistica_tcdc,
-    ROUND(SUM(IF(
-      mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
-      mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_logistica_tcd4
+    ))                                                     AS un_logistica_tcd4
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mard` AS mard
   INNER JOIN materiales_familia AS mf ON mf.Material = mard.MATNR
-  LEFT JOIN dimensiones AS d ON d.MATNR = mard.MATNR
   WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
   GROUP BY 1
 )
@@ -149,26 +124,15 @@ SELECT
   makt.MAKTX                                                             AS descripcion_material,
   d.MEINS                                                                AS UM_Base,
   d.volumen_unidad_m3,
-  -- Sin volumen en MARA -> las columnas m3 quedan en 0; usar las *_un.
-  IF(COALESCE(d.volumen_unidad_m3, 0) = 0, 'S', 'N')                     AS Sin_Volumen_MARA,
 
-  -- Unidad base
   st.un_libres_zonatraspaso,
   st.un_libres_operaciones,
   st.un_logistica_tcds,
   st.un_logistica_tcdc,
   st.un_logistica_tcd4,
-  st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4     AS UN_Disponible_Logistica,
-
-  -- M3. M3_Disponible_Logistica = suma de los 3 centros logísticos (no
-  -- incluye zonatraspaso/operaciones), igual que en Ventas_Nac.
-  st.m3_libres_zonatraspaso,
-  st.m3_libres_operaciones,
-  st.m3_logistica_tcds,
-  st.m3_logistica_tcdc,
-  st.m3_logistica_tcd4,
-  ROUND(st.m3_logistica_tcds + st.m3_logistica_tcdc + st.m3_logistica_tcd4, 3)
-                                                                         AS M3_Disponible_Logistica
+  -- Suma de los 3 centros logísticos (no incluye zonatraspaso/operaciones),
+  -- mismo criterio que M3_Disponible_Logistica en Ventas_Nac.
+  st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4     AS UN_Disponible_Logistica
 FROM stock_disponible AS st
 INNER JOIN materiales_familia AS mf
   ON mf.Material = st.Material
