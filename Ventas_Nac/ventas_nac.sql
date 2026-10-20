@@ -534,7 +534,22 @@ stock_disponible AS (
     ROUND(SUM(IF(
       mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
       mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_logistica_tcd4
+    )), 3)                                                 AS m3_logistica_tcd4,
+    -- Mismas 3 cubetas logísticas, sin convertir: unidad de medida base
+    -- (UMB, MARA.MEINS). Mismo criterio que stock_familias.
+    SUM(IF(
+      mard.WERKS = 'TCDS' AND mard.LGORT NOT IN ('V111','V112'),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcds,
+    SUM(IF(
+      (mard.WERKS = 'TCDC' AND mard.LGORT NOT IN ('V111','V112'))
+        OR (mard.WERKS = 'TCP7' AND mard.LGORT IN ('V001', 'V004')),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcdc,
+    SUM(IF(
+      mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcd4
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mard` AS mard
   LEFT JOIN dimensiones AS d ON d.MATNR = mard.MATNR
   WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
@@ -853,6 +868,11 @@ SELECT
   COALESCE(st.m3_logistica_tcds, 0)                                AS m3_logistica_tcds,
   COALESCE(st.m3_logistica_tcdc, 0)                                AS m3_logistica_tcdc,
   COALESCE(st.m3_logistica_tcd4, 0)                                AS m3_logistica_tcd4,
+  -- Stock logístico por centro en unidad de medida base (UMB), sin
+  -- conversión a m3 (mismas cubetas que m3_logistica_*).
+  COALESCE(st.un_logistica_tcds, 0)                                AS un_logistica_tcds,
+  COALESCE(st.un_logistica_tcdc, 0)                                AS un_logistica_tcdc,
+  COALESCE(st.un_logistica_tcd4, 0)                                AS un_logistica_tcd4,
   ROUND(
     COALESCE(st.m3_logistica_tcds, 0)
     + COALESCE(st.m3_logistica_tcdc, 0)
