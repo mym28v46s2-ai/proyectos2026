@@ -21,6 +21,7 @@ WITH
 materiales_z903 AS (
   SELECT
     MATNR                                                  AS Material,
+    MTART,
     MEINS
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mara`
   WHERE MTART = 'Z903'
@@ -106,6 +107,7 @@ cantidad_minima_pedido AS (
 -- ============================================================
 resultado_base AS (
   SELECT
+    mz.MTART                                                             AS Tipo_Material,
     zrc.nivel_2                                                          AS Nivel_2,
     zrc.nivel_3                                                          AS Nivel_3,
     zrc.nivel_4                                                          AS Nivel_4,
