@@ -549,7 +549,15 @@ stock_disponible AS (
     SUM(IF(
       mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
       mard.LABST, 0
-    ))                                                     AS un_logistica_tcd4
+    ))                                                     AS un_logistica_tcd4,
+    SUM(IF(
+      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PPT%',
+      mard.LABST, 0
+    ))                                                     AS un_libres_zonatraspaso,
+    SUM(IF(
+      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PAP%',
+      mard.LABST, 0
+    ))                                                     AS un_libres_operaciones
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mard` AS mard
   LEFT JOIN dimensiones AS d ON d.MATNR = mard.MATNR
   WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
@@ -577,6 +585,9 @@ demanda_abierta_linea AS (
     p.Cantidad_Venta
       * COALESCE(mu.UMREZ / NULLIF(mu.UMREN, 0), 1)
       * COALESCE(d.volumen_unidad_m3, 0)                            AS m3_linea,
+    -- Misma demanda en unidad de medida base (UMB), sin volumen.
+    p.Cantidad_Venta
+      * COALESCE(mu.UMREZ / NULLIF(mu.UMREN, 0), 1)                 AS un_linea,
     CASE
       WHEN DATE_DIFF(p.Fecha_Entrega_Preferente_Efectiva, CURRENT_DATE('America/Santiago'), DAY) <= 7  THEN 1
       WHEN DATE_DIFF(p.Fecha_Entrega_Preferente_Efectiva, CURRENT_DATE('America/Santiago'), DAY) <= 15 THEN 2
@@ -873,6 +884,8 @@ SELECT
   COALESCE(st.un_logistica_tcds, 0)                                AS un_logistica_tcds,
   COALESCE(st.un_logistica_tcdc, 0)                                AS un_logistica_tcdc,
   COALESCE(st.un_logistica_tcd4, 0)                                AS un_logistica_tcd4,
+  COALESCE(st.un_libres_zonatraspaso, 0)                           AS un_libres_zonatraspaso,
+  COALESCE(st.un_libres_operaciones, 0)                            AS un_libres_operaciones,
   ROUND(
     COALESCE(st.m3_logistica_tcds, 0)
     + COALESCE(st.m3_logistica_tcdc, 0)
@@ -886,6 +899,8 @@ SELECT
   -- siendo un conteo por Material, se agrega con MAX.
   COALESCE(dam.docs_demanda_abierta, 0)                            AS docs_demanda_abierta,
   ROUND(COALESCE(dal.m3_linea, 0), 3)                              AS m3_demanda_abierta_total,
+  -- Misma demanda abierta de la posición en UMB (0 si no califica).
+  ROUND(COALESCE(dal.un_linea, 0), 3)                              AS un_demanda_abierta_total,
   ROUND(COALESCE(IF(dal.segmento_dias = 1, dal.m3_linea, 0), 0), 3) AS m3_demanda_seg1,
   ROUND(COALESCE(IF(dal.segmento_dias = 2, dal.m3_linea, 0), 0), 3) AS m3_demanda_seg2,
   ROUND(COALESCE(IF(dal.segmento_dias = 3, dal.m3_linea, 0), 0), 3) AS m3_demanda_seg3,
