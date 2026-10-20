@@ -1,15 +1,27 @@
 -- =============================================================================
--- Stock por material para nivel_2_familia:
--- 'Term. Cantos', 'Herrajes', 'Complementario'.
--- Lógica de stock: la misma del CTE stock_disponible de Ventas_Nac/ventas_nac.sql
--- (MARD.LABST, segmentado en zona traspaso / operaciones / logística por centro,
--- TCD2 excluido, V111/V112 excluidos de logística), administrado en unidad de
--- medida base (UMB, MARA.MEINS), sin conversión a m3.
+-- Stock por material para materiales de tipo Z903 (MARA.MTART), con niveles
+-- de clasificación Gescorp 2 (familia) y 3 (subfamilia).
+-- Lógica de stock: cubetas logísticas del CTE stock_disponible de
+-- Ventas_Nac/ventas_nac.sql (MARD.LABST por centro TCDS/TCDC/TCD4, TCD2
+-- excluido, V111/V112 excluidos), administrado en unidad de medida base
+-- (UMB, MARA.MEINS), sin conversión a m3.
+-- Se excluyen los materiales obsoletos (stock_pedido='D') sin stock logístico.
 -- Jerarquía Gescorp vía CABN/AUSP/CAWN/CAWNT (KLART='001'), mismo patrón que
 -- Ventas_Nac / fillrate_etapa2.
 -- =============================================================================
 
 WITH
+
+-- ============================================================
+-- UNIVERSO DE MATERIALES: tipo de material Z903
+-- ============================================================
+materiales_z903 AS (
+  SELECT
+    MATNR                                                  AS Material,
+    MEINS
+  FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mara`
+  WHERE MTART = 'Z903'
+),
 
 -- ============================================================
 -- CLASIFICACIÓN DE MATERIALES (SKU) — jerarquía Gescorp
@@ -44,27 +56,10 @@ descripciones_sku AS (
   WHERE cawnt.spras = 'S'
 ),
 
--- Materiales del universo: nivel 2 en las 3 familias pedidas (cae al código
--- crudo si no hay descripción traducida).
-materiales_familia AS (
-  SELECT
-    cl.material                                                          AS Material,
-    COALESCE(d2.descripcion, cl.cod_nivel_2)                             AS nivel_2_familia,
-    COALESCE(d3.descripcion, cl.cod_nivel_3)                             AS nivel_3_subfamilia
-  FROM pivot_clasificacion AS cl
-  LEFT JOIN descripciones_sku AS d2
-    ON d2.caracteristica = 'RG_FAMILIA'    AND d2.codigo = cl.cod_nivel_2
-  LEFT JOIN descripciones_sku AS d3
-    ON d3.caracteristica = 'RG_SUBFAMILIA' AND d3.codigo = cl.cod_nivel_3
-  WHERE UPPER(TRIM(COALESCE(d2.descripcion, cl.cod_nivel_2)))
-        IN ('TERM. CANTOS', 'HERRAJES', 'COMPLEMENTARIO')
-),
-
 -- ============================================================
--- STOCK DISPONIBLE POR MATERIAL (mismo patrón que Ventas_Nac /
--- llenado_capacidad.sql)
--- zonatraspaso/operaciones: TCP1/TCP5/TCP7, LGORT PPT%/PAP%.
--- logística segmentada por centro: tcdc incluye también el caso
+-- STOCK DISPONIBLE LOGÍSTICO POR MATERIAL (mismo patrón que
+-- Ventas_Nac / llenado_capacidad.sql, sin zona traspaso ni operaciones)
+-- Logística segmentada por centro: tcdc incluye también el caso
 -- especial TCP7 con LGORT V001/V004. TCD2 se excluye por completo
 -- (error de copia conocido, no representa stock real). V111/V112
 -- (almacenes de daño) se excluyen en los 3 centros logísticos.
@@ -73,14 +68,6 @@ materiales_familia AS (
 stock_disponible AS (
   SELECT
     mard.MATNR                                             AS Material,
-    SUM(IF(
-      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PPT%',
-      mard.LABST, 0
-    ))                                                     AS un_libres_zonatraspaso,
-    SUM(IF(
-      mard.WERKS IN ('TCP1','TCP5','TCP7') AND mard.LGORT LIKE 'PAP%',
-      mard.LABST, 0
-    ))                                                     AS un_libres_operaciones,
     SUM(IF(
       mard.WERKS = 'TCDS' AND mard.LGORT NOT IN ('V111','V112'),
       mard.LABST, 0
@@ -95,8 +82,8 @@ stock_disponible AS (
       mard.LABST, 0
     ))                                                     AS un_logistica_tcd4
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mard` AS mard
-  INNER JOIN materiales_familia AS mf ON mf.Material = mard.MATNR
-  WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
+  INNER JOIN materiales_z903 AS mz ON mz.Material = mard.MATNR
+  WHERE mard.WERKS IN ('TCDS','TCDC','TCD4','TCP7')
   GROUP BY 1
 ),
 
@@ -115,36 +102,53 @@ cantidad_minima_pedido AS (
   WHERE VKORG = 'CL11'
     AND VTWEG = '84'
   GROUP BY MATNR
+),
+
+-- ============================================================
+-- RESULTADO BASE — un registro por material Z903
+-- ============================================================
+resultado_base AS (
+  SELECT
+    COALESCE(d2.descripcion, cl.cod_nivel_2)                             AS nivel_2_familia,
+    COALESCE(d3.descripcion, cl.cod_nivel_3)                             AS nivel_3_subfamilia,
+    mz.Material,
+    makt.MAKTX                                                           AS descripcion_material,
+    mz.MEINS                                                             AS UM_Base,
+    -- Mismo campo que Ventas_Nac: MARC.PRENO del centro TCDS
+    -- (P=a pedido, S=a stock, D=obsoleto).
+    marc.PRENO                                                           AS stock_pedido,
+    -- Cantidad mínima de pedido TCDC (MVKE.AUMNG, CL11 / canal 84), en UMB.
+    cmp.AUMNG                                                            AS Cant_Min_Pedido_TCDC,
+    COALESCE(st.un_logistica_tcds, 0)                                    AS un_logistica_tcds,
+    COALESCE(st.un_logistica_tcdc, 0)                                    AS un_logistica_tcdc,
+    COALESCE(st.un_logistica_tcd4, 0)                                    AS un_logistica_tcd4,
+    -- Suma de los 3 centros logísticos, mismo criterio de disponible
+    -- logístico que Ventas_Nac.
+    COALESCE(st.un_logistica_tcds, 0)
+      + COALESCE(st.un_logistica_tcdc, 0)
+      + COALESCE(st.un_logistica_tcd4, 0)                                AS UN_Disponible_Logistica
+  FROM materiales_z903 AS mz
+  LEFT JOIN pivot_clasificacion AS cl
+    ON cl.material = mz.Material
+  LEFT JOIN descripciones_sku AS d2
+    ON d2.caracteristica = 'RG_FAMILIA'    AND d2.codigo = cl.cod_nivel_2
+  LEFT JOIN descripciones_sku AS d3
+    ON d3.caracteristica = 'RG_SUBFAMILIA' AND d3.codigo = cl.cod_nivel_3
+  LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.makt` AS makt
+    ON  makt.MATNR = mz.Material
+    AND makt.SPRAS = 'S'
+  LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.marc` AS marc
+    ON  marc.MATNR = mz.Material
+    AND marc.WERKS = 'TCDS'
+  LEFT JOIN stock_disponible AS st
+    ON st.Material = mz.Material
+  LEFT JOIN cantidad_minima_pedido AS cmp
+    ON cmp.Material = mz.Material
 )
 
-SELECT
-  mf.nivel_2_familia,
-  mf.nivel_3_subfamilia,
-  st.Material,
-  makt.MAKTX                                                             AS descripcion_material,
-  mara.MEINS                                                             AS UM_Base,
-  -- Cantidad mínima de pedido TCDC (MVKE.AUMNG, CL11 / canal 84), en UMB.
-  cmp.AUMNG                                                              AS Cant_Min_Pedido_TCDC,
-
-  st.un_libres_zonatraspaso,
-  st.un_libres_operaciones,
-  st.un_logistica_tcds,
-  st.un_logistica_tcdc,
-  st.un_logistica_tcd4,
-  -- Suma de los 3 centros logísticos (no incluye zonatraspaso/operaciones),
-  -- mismo criterio de disponible logístico que Ventas_Nac.
-  st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4     AS UN_Disponible_Logistica
-FROM stock_disponible AS st
-INNER JOIN materiales_familia AS mf
-  ON mf.Material = st.Material
-LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.mara` AS mara
-  ON mara.MATNR = st.Material
-LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.makt` AS makt
-  ON  makt.MATNR = st.Material
-  AND makt.SPRAS = 'S'
-LEFT JOIN cantidad_minima_pedido AS cmp
-  ON cmp.Material = st.Material
--- Solo materiales con algún stock en las cubetas consideradas.
-WHERE st.un_libres_zonatraspaso + st.un_libres_operaciones
-    + st.un_logistica_tcds + st.un_logistica_tcdc + st.un_logistica_tcd4 > 0
-ORDER BY mf.nivel_2_familia, mf.nivel_3_subfamilia, st.Material;
+SELECT *
+FROM resultado_base
+-- Excluye obsoletos (stock_pedido='D') sin stock logístico. Un 'D' con
+-- stock se mantiene; stock_pedido NULL se trata como no obsoleto.
+WHERE NOT (COALESCE(stock_pedido, '') = 'D' AND UN_Disponible_Logistica = 0)
+ORDER BY nivel_2_familia, nivel_3_subfamilia, Material;
