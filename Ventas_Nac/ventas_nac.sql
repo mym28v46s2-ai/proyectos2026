@@ -164,6 +164,7 @@ pedidos_con_centro AS (
 dimensiones AS (
   SELECT
     MATNR,
+    MTART                                                   AS Tipo_Material,
     CASE VOLEH
       WHEN 'CDM' THEN COALESCE(VOLUM, 0) / 1000.0
       WHEN 'CM3' THEN COALESCE(VOLUM, 0) / 1000000.0
@@ -204,22 +205,19 @@ unidades_paquete AS (
 
 
 -- ============================================================
--- CTE 3: CLASIFICACIÓN DE MATERIALES (SKU) — jerarquía Gescorp
--- vía CABN/AUSP/CAWN/CAWNT, mismo patrón que fillrate_etapa2/
--- sql/consultas/llenado_capacidad.sql
+-- CTE 3: NIVEL 6 (RG_NIVELRG) — jerarquía Gescorp vía CABN/AUSP/
+-- CAWN/CAWNT. Los niveles 2/3/4 vienen de ZRC (CTE 3B); RG_NIVELRG no
+-- tiene equivalente en ZRC, por eso solo este nivel sigue en Gescorp.
 -- ============================================================
 cabn_sku AS (
   SELECT ATINN, ATNAM
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.cabn`
-  WHERE ATNAM IN ('RG_FAMILIA', 'RG_SUBFAMILIA', 'RG_MARCA', 'RG_NIVELRG')
+  WHERE ATNAM = 'RG_NIVELRG'
 ),
 pivot_clasificacion AS (
   SELECT
     ausp.OBJEK                                                              AS material,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_FAMILIA'    THEN ausp.ATWRT END)    AS cod_nivel_2,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_SUBFAMILIA' THEN ausp.ATWRT END)    AS cod_nivel_3,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_MARCA'      THEN ausp.ATWRT END)    AS cod_nivel_4,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_NIVELRG'    THEN ausp.ATWRT END)    AS cod_nivel_6
+    MAX(ausp.ATWRT)                                                         AS cod_nivel_6
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.ausp` AS ausp
   INNER JOIN cabn_sku ON ausp.ATINN = cabn_sku.ATINN
   WHERE ausp.KLART = '001'
@@ -236,6 +234,55 @@ descripciones_sku AS (
     AND cawn.atzhl = cawnt.atzhl
   INNER JOIN cabn_sku ON cawn.atinn = cabn_sku.ATINN
   WHERE cawnt.spras = 'S'
+),
+
+
+-- ============================================================
+-- CTE 3B: CLASIFICACIÓN ZRC (sap_mm.ZRC_MM_REPORTE_MATERIALES)
+-- Fuente de nivel_2_familia / nivel_3_subfamilia / nivel_4_marca (N2/
+-- N3/N4 de ZRC = descripción de RG_FAMILIA/RG_SUBFAMILIA/RG_MARCA).
+-- Reemplaza a la jerarquía Gescorp para esos niveles (2026-10-20),
+-- manteniendo los nombres de columna. Mismo método que stock_familias/
+-- stock_cantos_herrajes_complementario.sql: ZRC trae ~29 filas por
+-- material y ~5% con combinaciones distintas -> se toma la combinación
+-- más frecuente. MATNR normalizado sin ceros a la izquierda en ambos
+-- lados. Se acota a los materiales de los pedidos (ZRC ~9,9 M filas).
+-- Material sin ZRC -> niveles NULL (sin respaldo Gescorp). Estos
+-- niveles definen también el universo de repaqueteo (CTE 14B).
+-- ============================================================
+clasificacion_zrc AS (
+  SELECT
+    LTRIM(TRIM(MATNR), '0')                                 AS matnr_norm,
+    NULLIF(TRIM(N2), '')                                    AS nivel_2,
+    NULLIF(TRIM(N3), '')                                    AS nivel_3,
+    NULLIF(TRIM(N4), '')                                    AS nivel_4,
+    NULLIF(TRIM(N5), '')                                    AS nivel_5
+  FROM `aecorsoft.sap_mm.ZRC_MM_REPORTE_MATERIALES`
+  WHERE LTRIM(TRIM(MATNR), '0') IN (
+    SELECT LTRIM(TRIM(Material), '0') FROM pedidos_base
+  )
+  GROUP BY 1, 2, 3, 4, 5
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY matnr_norm
+    ORDER BY COUNT(*) DESC, nivel_2, nivel_3, nivel_4, nivel_5
+  ) = 1
+),
+
+
+-- ============================================================
+-- CTE 3C: CANTIDAD MÍNIMA DE PEDIDO (MVKE.AUMNG), en UMB.
+-- MVKE no tiene centro (clave MATNR + VKORG + VTWEG): se toma el área
+-- de ventas CL11 / canal 84, que es la que abastece TCDC (mismo
+-- criterio que stock_familias). MAX por si la réplica trae duplicados.
+-- ============================================================
+cantidad_minima_pedido AS (
+  SELECT
+    MATNR                                                   AS Material,
+    MAX(AUMNG)                                              AS AUMNG
+  FROM `aecorsoft.sap_sd.mvke`
+  WHERE VKORG = 'CL11'
+    AND VTWEG = '84'
+  GROUP BY MATNR
 ),
 
 
@@ -487,7 +534,22 @@ stock_disponible AS (
     ROUND(SUM(IF(
       mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
       mard.LABST * COALESCE(d.volumen_unidad_m3, 0), 0
-    )), 3)                                                 AS m3_logistica_tcd4
+    )), 3)                                                 AS m3_logistica_tcd4,
+    -- Mismas 3 cubetas logísticas, sin convertir: unidad de medida base
+    -- (UMB, MARA.MEINS). Mismo criterio que stock_familias.
+    SUM(IF(
+      mard.WERKS = 'TCDS' AND mard.LGORT NOT IN ('V111','V112'),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcds,
+    SUM(IF(
+      (mard.WERKS = 'TCDC' AND mard.LGORT NOT IN ('V111','V112'))
+        OR (mard.WERKS = 'TCP7' AND mard.LGORT IN ('V001', 'V004')),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcdc,
+    SUM(IF(
+      mard.WERKS = 'TCD4' AND mard.LGORT NOT IN ('V111','V112'),
+      mard.LABST, 0
+    ))                                                     AS un_logistica_tcd4
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.mard` AS mard
   LEFT JOIN dimensiones AS d ON d.MATNR = mard.MATNR
   WHERE mard.WERKS IN ('TCP1','TCP5','TCP7','TCDS','TCDC','TCD4')
@@ -730,12 +792,17 @@ SELECT
 
   p.Material,
   dm.descripcion_material,
-  COALESCE(d2.descripcion, cl.cod_nivel_2)                        AS nivel_2_familia,
-  COALESCE(d3.descripcion, cl.cod_nivel_3)                        AS nivel_3_subfamilia,
-  COALESCE(d4.descripcion, cl.cod_nivel_4)                        AS nivel_4_marca,
+  -- Tipo de material (MARA.MTART).
+  d.Tipo_Material,
+  -- Niveles 2/3/4 desde ZRC (CTE 3B); nivel 6 desde Gescorp (CTE 3).
+  zrc.nivel_2                                                     AS nivel_2_familia,
+  zrc.nivel_3                                                     AS nivel_3_subfamilia,
+  zrc.nivel_4                                                     AS nivel_4_marca,
   COALESCE(d6.descripcion, cl.cod_nivel_6)                        AS nivel_6_nivelrg,
   marc.PRENO                                                      AS stock_pedido,
   marc.MAABC                                                      AS tipo_fillrate,
+  -- Cantidad mínima de pedido TCDC (MVKE.AUMNG, CL11 / canal 84), en UMB.
+  cmp.AUMNG                                                       AS Cant_Min_Pedido_TCDC,
 
   p.Region,
   -- Ver pedidos_con_centro para el detalle de la agrupación región->
@@ -801,6 +868,11 @@ SELECT
   COALESCE(st.m3_logistica_tcds, 0)                                AS m3_logistica_tcds,
   COALESCE(st.m3_logistica_tcdc, 0)                                AS m3_logistica_tcdc,
   COALESCE(st.m3_logistica_tcd4, 0)                                AS m3_logistica_tcd4,
+  -- Stock logístico por centro en unidad de medida base (UMB), sin
+  -- conversión a m3 (mismas cubetas que m3_logistica_*).
+  COALESCE(st.un_logistica_tcds, 0)                                AS un_logistica_tcds,
+  COALESCE(st.un_logistica_tcdc, 0)                                AS un_logistica_tcdc,
+  COALESCE(st.un_logistica_tcd4, 0)                                AS un_logistica_tcd4,
   ROUND(
     COALESCE(st.m3_logistica_tcds, 0)
     + COALESCE(st.m3_logistica_tcdc, 0)
@@ -879,17 +951,15 @@ LEFT JOIN devolucion_posicion AS dv
   AND dv.POSNR = p.Posicion
 LEFT JOIN pivot_clasificacion AS cl
   ON cl.material = p.Material
-LEFT JOIN descripciones_sku AS d2
-  ON d2.caracteristica = 'RG_FAMILIA'    AND d2.codigo = cl.cod_nivel_2
-LEFT JOIN descripciones_sku AS d3
-  ON d3.caracteristica = 'RG_SUBFAMILIA' AND d3.codigo = cl.cod_nivel_3
-LEFT JOIN descripciones_sku AS d4
-  ON d4.caracteristica = 'RG_MARCA'      AND d4.codigo = cl.cod_nivel_4
 LEFT JOIN descripciones_sku AS d6
   ON d6.caracteristica = 'RG_NIVELRG'    AND d6.codigo = cl.cod_nivel_6
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.marc` AS marc
   ON  marc.MATNR = p.Material
   AND marc.WERKS = 'TCDS'
+LEFT JOIN clasificacion_zrc AS zrc
+  ON zrc.matnr_norm = LTRIM(TRIM(p.Material), '0')
+LEFT JOIN cantidad_minima_pedido AS cmp
+  ON cmp.Material = p.Material
 LEFT JOIN unidades_paquete AS up
   ON up.MATNR = p.Material
 LEFT JOIN stock_disponible AS st
