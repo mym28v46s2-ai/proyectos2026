@@ -25,7 +25,7 @@ updated: 2026-09-28
 |---|---|---|
 | `cdc_produccion_pp_cp50_01_new` | Maestro de materiales y stock: `mara`, `makt`, `marc`, `marm`, `mard`, `mcha`, `mseg_full`, `mkpf`, `cabn`, `ausp`, `cawn`, `cawnt`. También `mchb` (asumida, aún sin confirmar) | El nombre "cp50_01" no es intuitivo — es el dataset "grande" de datos de producción/materiales |
 | `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `mvke`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
-| `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
+| `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, `ZRC_MM_REPORTE_MATERIALES` (custom), y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
 | `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`, `Vol_Producir_M3`, `Estado_Pos` (`PEND`/`CUMP`/`SOBR`), `Booking` (solo agendamiento de nave), `Salmer` (`S`=salida de mercancía contabilizada / `N`), `Fecha_Embarque_Comprometida`, `Nombre_de_Nave` (`'Camion'`=envío terrestre, sin `Booking`), `Inic_pl_transporte`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
@@ -101,6 +101,7 @@ updated: 2026-09-28
 | Tabla | Dataset | Uso |
 |---|---|---|
 | `zconfol` | `sap_fi` | Folio fiscal (Chile: `NFOLIO`; México: `UUID`/timbrado). Ver sección 4 |
+| `ZRC_MM_REPORTE_MATERIALES` | `sap_mm` | Reporte Z de maestro de materiales con clasificación ya traducida: `N1`..`N5` (texto). `N2`/`N3`/`N4` = descripción de `RG_FAMILIA`/`RG_SUBFAMILIA`/`RG_MARCA` de Gescorp; `N1` y `N5` no existen en Gescorp (ej. `N1`='Solución Productos Terceros', `N5`='Tapacanto PVC Blanco'). Trae además `MAKTX`, `MTART`, `LVORM`, dimensiones, `M3`, `IDNRK`/`OJTXP`, `V1`..`V7` y datos de empaque. ~9,9 M filas / 342.693 materiales (~29 filas repetidas por material); ~5% (16.976) con N2/N3 distintos entre filas. `MARA.MATNR` trae ceros a la izquierda → cruzar con `LTRIM(TRIM(MATNR),'0')` en ambos lados. Cobertura Z903: 4.052/12.577 en total, 990/991 con stock logístico (diagnósticos 2026-10-20). Usado en `stock_familias` |
 | `ZCL_SD_DUS1` | `sap_sd` | Reporte Z ventas↔transporte, 1 fila = posición dentro de un `TKNUM` |
 | `zsd_t_export` | `sap_sd` (nombre no confirmado al 100%) | Reporte Z ventas↔producción, incluye posiciones sin transporte asignado |
 
@@ -172,6 +173,60 @@ Patrón de CTEs: `cabn_sku` → `pivot_clasificacion` → `descripciones_sku`. C
 crudo (`cod_nivel_*`) si no hay descripción traducida. Origen confirmado en
 `fillrate_etapa2/llenado_capacidad.sql`; reutilizado literal en `prov_inventarios`,
 `ventas_cl`, `ventas_stocks_ventas`, `log_asignacion_optima`.
+
+#### 3.3.1 Alternativa: `sap_mm.ZRC_MM_REPORTE_MATERIALES` (niveles ya traducidos)
+
+Reporte Z de maestro de materiales que trae la clasificación **ya en texto**, sin pasar
+por `CABN`/`AUSP`/`CAWN`/`CAWNT`. Validado contra Gescorp el 2026-10-20 (3 materiales
+Z903 de ejemplo, ver `stock_familias`):
+
+| Columna ZRC | Equivale a | Ejemplo (canto PVC, `MATNR` 208084) |
+|---|---|---|
+| `N1` | — (no existe en Gescorp) | `Solución Productos Terceros` |
+| `N2` | descripción de `RG_FAMILIA` (nivel 2) | `Termin. Cantos` |
+| `N3` | descripción de `RG_SUBFAMILIA` (nivel 3) | `Terminaciones de Cantos` |
+| `N4` | descripción de `RG_MARCA` (nivel 4) | `Tapacanto PVC` |
+| `N5` | — (nivel más fino, no existe en Gescorp) | `Tapacanto PVC Blanco` |
+
+Casos particulares (diagnósticos 2026-10-20):
+
+- **Filas repetidas:** ~9,9 M filas para 342.693 materiales (~29 por material). En los
+  ejemplos las 29 filas son idénticas (`IDNRK`/`OJTXP` vacíos), causa no identificada.
+  Siempre agrupar a 1 fila por material.
+- **Niveles en conflicto:** 16.976 materiales (~5%) tienen N2/N3 distintos entre filas.
+  `MAX` por columna puede mezclar niveles de filas distintas y elige el último
+  alfabéticamente — preferir la **combinación N2..N5 más frecuente** (patrón abajo).
+- **Ceros a la izquierda:** `MARA.MATNR` los trae (12.553 de 12.577 Z903); normalizar
+  **ambos lados** con `LTRIM(TRIM(MATNR), '0')` al cruzar.
+- **Cobertura parcial:** de los Z903, solo 4.052/12.577 están en ZRC; pero de los Z903
+  **con stock logístico** están 990/991 (Gescorp: 991/991). Los materiales fuera de ZRC
+  quedan con niveles `NULL`. En `stock_familias` se decidió usar **solo ZRC, sin respaldo
+  Gescorp** (2026-10-20); si otro proyecto necesita cobertura total, Gescorp cubre N2..N4.
+- **Niveles en blanco:** convertir `''` a `NULL` (`NULLIF(TRIM(Nx), '')`).
+
+Patrón recomendado (de `stock_familias/stock_cantos_herrajes_complementario.sql`):
+
+```sql
+clasificacion_zrc AS (
+  SELECT
+    LTRIM(TRIM(MATNR), '0')  AS matnr_norm,
+    NULLIF(TRIM(N2), '')     AS nivel_2,
+    NULLIF(TRIM(N3), '')     AS nivel_3,
+    NULLIF(TRIM(N4), '')     AS nivel_4,
+    NULLIF(TRIM(N5), '')     AS nivel_5
+  FROM `aecorsoft.sap_mm.ZRC_MM_REPORTE_MATERIALES`
+  -- (opcional) acotar al universo: WHERE LTRIM(TRIM(MATNR), '0') IN (...)
+  GROUP BY 1, 2, 3, 4, 5
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY matnr_norm
+    ORDER BY COUNT(*) DESC, nivel_2, nivel_3, nivel_4, nivel_5
+  ) = 1
+)
+-- Cruce (LEFT JOIN): ON zrc.matnr_norm = LTRIM(TRIM(<tabla>.MATNR), '0')
+```
+
+Columnas de ZRC aún **sin interpretar** (no usar sin validar): `MTART2`, `PERFIL`,
+`TERMIN`, `V1`..`V7`, `PZATADO`, `ATADPAK`, `PZAPAK`, `PLASTIF`, `EMPAQ`, `M3`.
 
 ### 3.4 Centros (`WERKS`) y almacenes (`LGORT`)
 
@@ -299,6 +354,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `log_fillrate_lotesabajo` | Fill rate desde exports Excel (`vbak`/`vbap`/`mara`/`marm`/`likp`/`lips`/`vttp`/`vttk`/`vekp`/`vepo`) | (Excel, no BQ directo) | — | sin `CLAUDE.md` propio |
 | `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver nota de memoria `project_lineas_activas`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
 | `comex_facturacion` | Tiempo embarque→factura | `likp`/`vbfa`/`vbrk` (Excel) | `resultado_tiempo_embarque_factura.xlsx` | sin `CLAUDE.md` propio |
+| `stock_familias` | Stock logístico (UMB) de materiales Z903 con clasificación N2..N5, `stock_pedido` y cantidad mínima de pedido | `mara`/`mard`/`marc`/`makt`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` | `stock_cantos_herrajes_complementario.sql` | — (sin `CLAUDE.md` propio) |
 | `papeles_hugo` | Exploratorio — origen de `sap_sd.t005t` | `t005t` | — | sin `CLAUDE.md` propio |
 
 ## 7. Huecos de replicación conocidos (no perder tiempo re-descubriéndolos)
