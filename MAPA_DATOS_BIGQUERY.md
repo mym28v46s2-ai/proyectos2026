@@ -24,7 +24,7 @@ updated: 2026-09-28
 | Dataset | Contenido | Notas |
 |---|---|---|
 | `cdc_produccion_pp_cp50_01_new` | Maestro de materiales y stock: `mara`, `makt`, `marc`, `marm`, `mard`, `mcha`, `mseg_full`, `mkpf`, `cabn`, `ausp`, `cawn`, `cawnt`. También `mchb` (asumida, aún sin confirmar) | El nombre "cp50_01" no es intuitivo — es el dataset "grande" de datos de producción/materiales |
-| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `mvke`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
+| `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `mvke`, `ZCL_SD_DUS1` (custom), `zsd_t_dus1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
 | `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, `ZRC_MM_REPORTE_MATERIALES` (custom), y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
@@ -103,6 +103,7 @@ updated: 2026-09-28
 | `zconfol` | `sap_fi` | Folio fiscal (Chile: `NFOLIO`; México: `UUID`/timbrado). Ver sección 4 |
 | `ZRC_MM_REPORTE_MATERIALES` | `sap_mm` | Reporte Z de maestro de materiales con clasificación ya traducida: `N1`..`N5` (texto). `N2`/`N3`/`N4` = descripción de `RG_FAMILIA`/`RG_SUBFAMILIA`/`RG_MARCA` de Gescorp; `N1` y `N5` no existen en Gescorp (ej. `N1`='Solución Productos Terceros', `N5`='Tapacanto PVC Blanco'). Trae además `MAKTX`, `MTART`, `LVORM`, dimensiones, `M3`, `IDNRK`/`OJTXP`, `V1`..`V7` y datos de empaque. ~9,9 M filas / 342.693 materiales (~29 filas repetidas por material); ~5% (16.976) con N2/N3 distintos entre filas. `MARA.MATNR` trae ceros a la izquierda → cruzar con `LTRIM(TRIM(MATNR),'0')` en ambos lados. Cobertura Z903: 4.052/12.577 en total, 990/991 con stock logístico (diagnósticos 2026-10-20). Usado en `stock_familias` y en `Ventas_Nac` (fuente de `nivel_2_familia`/`nivel_3_subfamilia`/`nivel_4_marca` desde 2026-10-20, reemplazando a Gescorp; `nivel_6_nivelrg` sigue en Gescorp) |
 | `ZCL_SD_DUS1` | `sap_sd` | Reporte Z ventas↔transporte, 1 fila = posición dentro de un `TKNUM` |
+| `zsd_t_dus1` | `sap_sd` | Tabla Z DUS1 con `matnr` y `etd` (formato no confirmado: DATE, `'YYYY-MM-DD'` o `'YYYYMMDD'`). Usada en `dus_materiales` (2026-10-20); relación con `ZCL_SD_DUS1` no verificada |
 | `zsd_t_export` | `sap_sd` (nombre no confirmado al 100%) | Reporte Z ventas↔producción, incluye posiciones sin transporte asignado |
 
 ### 2.6 No disponibles en BigQuery (confirmado, no perder tiempo buscando)
@@ -322,6 +323,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `materiales_interes` | `fillrate_2026/materiales_interes.sql` | 1 columna (`matnr`), universo dinámico de pedidos ZPN | Acota `inventario.sql` y el cruce de causa raíz |
 | `prov_inventarios_monitor_dano` | `prov_inventarios/sql/vistas/monitor_lotes_dano.sql` | 1 fila por lote en almacén de daño | Looker Studio |
 | `prov_inventarios_monitor_obsoletos` | `prov_inventarios/sql/vistas/monitor_lotes_obsoletos.sql` | 1 fila por lote con `MARC.PRENO='D'` (whitelist de 37 `MTART`) | Looker Studio |
+| `dus_materiales` | `dus_materiales/dus_materiales.sql` | Grano de `zsd_t_dus1`, ventana etd mes anterior→mes próximo, particionada por `etd_fecha`, + `N2`..`N5` de ZRC | (por definir) |
 | `bloqueo_liberacion_credito_kanban` | (planeada, aún no subida) `log_fillrate_etapa4` — reconstruida desde `CDHDR`/`CDPOS` vía `SE16N` manual | `(ID_Documento, Campo, Fecha_Inicio, Fecha_Fin, ...)` | `fillrate_causa_raiz_bloqueo_comercial.sql` |
 
 > [!bug] Riesgo de tabla desactualizada
@@ -355,6 +357,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver nota de memoria `project_lineas_activas`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
 | `comex_facturacion` | Tiempo embarque→factura | `likp`/`vbfa`/`vbrk` (Excel) | `resultado_tiempo_embarque_factura.xlsx` | sin `CLAUDE.md` propio |
 | `stock_familias` | Stock logístico (UMB) de materiales Z903 con clasificación N2..N5, `stock_pedido` y cantidad mínima de pedido | `mara`/`mard`/`marc`/`makt`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` | `stock_cantos_herrajes_complementario.sql` | — (sin `CLAUDE.md` propio) |
+| `dus_materiales` | DUS1 con clasificación de materiales N2..N5, ventana móvil de 3 meses por `etd`, refresco diario | `zsd_t_dus1`, `ZRC_MM_REPORTE_MATERIALES` | `Procesos_CDS.dus_materiales` | — (sin `CLAUDE.md` propio) |
 | `papeles_hugo` | Exploratorio — origen de `sap_sd.t005t` | `t005t` | — | sin `CLAUDE.md` propio |
 
 ## 7. Huecos de replicación conocidos (no perder tiempo re-descubriéndolos)
