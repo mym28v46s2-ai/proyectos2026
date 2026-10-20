@@ -199,10 +199,10 @@ Casos particulares (diagnósticos 2026-10-20):
 - **Ceros a la izquierda:** `MARA.MATNR` los trae (12.553 de 12.577 Z903); normalizar
   **ambos lados** con `LTRIM(TRIM(MATNR), '0')` al cruzar.
 - **Cobertura parcial:** de los Z903, solo 4.052/12.577 están en ZRC; pero de los Z903
-  **con stock logístico** están 990/991 (Gescorp: 991/991). Para universos que incluyan
-  materiales sin stock, usar Gescorp como respaldo para N2..N4.
-- **Niveles en blanco:** convertir `''` a `NULL` (`NULLIF(TRIM(Nx), '')`) para que el
-  `COALESCE` con Gescorp funcione.
+  **con stock logístico** están 990/991 (Gescorp: 991/991). Los materiales fuera de ZRC
+  quedan con niveles `NULL`. En `stock_familias` se decidió usar **solo ZRC, sin respaldo
+  Gescorp** (2026-10-20); si otro proyecto necesita cobertura total, Gescorp cubre N2..N4.
+- **Niveles en blanco:** convertir `''` a `NULL` (`NULLIF(TRIM(Nx), '')`).
 
 Patrón recomendado (de `stock_familias/stock_cantos_herrajes_complementario.sql`):
 
@@ -222,9 +222,7 @@ clasificacion_zrc AS (
     ORDER BY COUNT(*) DESC, nivel_2, nivel_3, nivel_4, nivel_5
   ) = 1
 )
--- Cruce:  ON zrc.matnr_norm = LTRIM(TRIM(<tabla>.MATNR), '0')
--- Niveles: COALESCE(zrc.nivel_2, <descripción Gescorp RG_FAMILIA>, <código crudo>)
--- Auditoría: columna origen_clasificacion = 'ZRC' / 'Gescorp' / 'Sin clasificación'
+-- Cruce (LEFT JOIN): ON zrc.matnr_norm = LTRIM(TRIM(<tabla>.MATNR), '0')
 ```
 
 Columnas de ZRC aún **sin interpretar** (no usar sin validar): `MTART2`, `PERFIL`,
@@ -356,7 +354,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `log_fillrate_lotesabajo` | Fill rate desde exports Excel (`vbak`/`vbap`/`mara`/`marm`/`likp`/`lips`/`vttp`/`vttk`/`vekp`/`vepo`) | (Excel, no BQ directo) | — | sin `CLAUDE.md` propio |
 | `plan_planmolduras` | Decisión de producción por línea (30 líneas activas, ver nota de memoria `project_lineas_activas`) | `mara` (Excel) | `decisiones_produccion.xlsx` | sin `CLAUDE.md` propio |
 | `comex_facturacion` | Tiempo embarque→factura | `likp`/`vbfa`/`vbrk` (Excel) | `resultado_tiempo_embarque_factura.xlsx` | sin `CLAUDE.md` propio |
-| `stock_familias` | Stock logístico (UMB) de materiales Z903 con clasificación N2..N5, `stock_pedido` y cantidad mínima de pedido | `mara`/`mard`/`marc`/`makt`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` (+ Gescorp de respaldo) | `stock_cantos_herrajes_complementario.sql` | — (sin `CLAUDE.md` propio) |
+| `stock_familias` | Stock logístico (UMB) de materiales Z903 con clasificación N2..N5, `stock_pedido` y cantidad mínima de pedido | `mara`/`mard`/`marc`/`makt`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` | `stock_cantos_herrajes_complementario.sql` | — (sin `CLAUDE.md` propio) |
 | `papeles_hugo` | Exploratorio — origen de `sap_sd.t005t` | `t005t` | — | sin `CLAUDE.md` propio |
 
 ## 7. Huecos de replicación conocidos (no perder tiempo re-descubriéndolos)
