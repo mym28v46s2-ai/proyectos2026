@@ -205,22 +205,19 @@ unidades_paquete AS (
 
 
 -- ============================================================
--- CTE 3: CLASIFICACIÓN DE MATERIALES (SKU) — jerarquía Gescorp
--- vía CABN/AUSP/CAWN/CAWNT, mismo patrón que fillrate_etapa2/
--- sql/consultas/llenado_capacidad.sql
+-- CTE 3: NIVEL 6 (RG_NIVELRG) — jerarquía Gescorp vía CABN/AUSP/
+-- CAWN/CAWNT. Los niveles 2/3/4 vienen de ZRC (CTE 3B); RG_NIVELRG no
+-- tiene equivalente en ZRC, por eso solo este nivel sigue en Gescorp.
 -- ============================================================
 cabn_sku AS (
   SELECT ATINN, ATNAM
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.cabn`
-  WHERE ATNAM IN ('RG_FAMILIA', 'RG_SUBFAMILIA', 'RG_MARCA', 'RG_NIVELRG')
+  WHERE ATNAM = 'RG_NIVELRG'
 ),
 pivot_clasificacion AS (
   SELECT
     ausp.OBJEK                                                              AS material,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_FAMILIA'    THEN ausp.ATWRT END)    AS cod_nivel_2,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_SUBFAMILIA' THEN ausp.ATWRT END)    AS cod_nivel_3,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_MARCA'      THEN ausp.ATWRT END)    AS cod_nivel_4,
-    MAX(CASE WHEN cabn_sku.ATNAM = 'RG_NIVELRG'    THEN ausp.ATWRT END)    AS cod_nivel_6
+    MAX(ausp.ATWRT)                                                         AS cod_nivel_6
   FROM `aecorsoft.cdc_produccion_pp_cp50_01_new.ausp` AS ausp
   INNER JOIN cabn_sku ON ausp.ATINN = cabn_sku.ATINN
   WHERE ausp.KLART = '001'
@@ -242,15 +239,16 @@ descripciones_sku AS (
 
 -- ============================================================
 -- CTE 3B: CLASIFICACIÓN ZRC (sap_mm.ZRC_MM_REPORTE_MATERIALES)
--- Mismo método que stock_familias/stock_cantos_herrajes_complementario.sql:
--- niveles N2..N5 ya traducidos (N2/N3/N4 = descripción de RG_FAMILIA/
--- RG_SUBFAMILIA/RG_MARCA; N5 no existe en Gescorp). ZRC trae ~29 filas
--- por material y ~5% con combinaciones distintas: se toma la combinación
+-- Fuente de nivel_2_familia / nivel_3_subfamilia / nivel_4_marca (N2/
+-- N3/N4 de ZRC = descripción de RG_FAMILIA/RG_SUBFAMILIA/RG_MARCA).
+-- Reemplaza a la jerarquía Gescorp para esos niveles (2026-10-20),
+-- manteniendo los nombres de columna. Mismo método que stock_familias/
+-- stock_cantos_herrajes_complementario.sql: ZRC trae ~29 filas por
+-- material y ~5% con combinaciones distintas -> se toma la combinación
 -- más frecuente. MATNR normalizado sin ceros a la izquierda en ambos
 -- lados. Se acota a los materiales de los pedidos (ZRC ~9,9 M filas).
--- Columnas adicionales (Nivel_2..Nivel_5): la jerarquía Gescorp
--- (nivel_2_familia...) se mantiene y sigue definiendo el universo de
--- repaqueteo.
+-- Material sin ZRC -> niveles NULL (sin respaldo Gescorp). Estos
+-- niveles definen también el universo de repaqueteo (CTE 14B).
 -- ============================================================
 clasificacion_zrc AS (
   SELECT
@@ -781,15 +779,11 @@ SELECT
   dm.descripcion_material,
   -- Tipo de material (MARA.MTART).
   d.Tipo_Material,
-  COALESCE(d2.descripcion, cl.cod_nivel_2)                        AS nivel_2_familia,
-  COALESCE(d3.descripcion, cl.cod_nivel_3)                        AS nivel_3_subfamilia,
-  COALESCE(d4.descripcion, cl.cod_nivel_4)                        AS nivel_4_marca,
+  -- Niveles 2/3/4 desde ZRC (CTE 3B); nivel 6 desde Gescorp (CTE 3).
+  zrc.nivel_2                                                     AS nivel_2_familia,
+  zrc.nivel_3                                                     AS nivel_3_subfamilia,
+  zrc.nivel_4                                                     AS nivel_4_marca,
   COALESCE(d6.descripcion, cl.cod_nivel_6)                        AS nivel_6_nivelrg,
-  -- Clasificación ZRC (CTE 3B), NULL si el material no está en ZRC.
-  zrc.nivel_2                                                     AS Nivel_2,
-  zrc.nivel_3                                                     AS Nivel_3,
-  zrc.nivel_4                                                     AS Nivel_4,
-  zrc.nivel_5                                                     AS Nivel_5,
   marc.PRENO                                                      AS stock_pedido,
   marc.MAABC                                                      AS tipo_fillrate,
   -- Cantidad mínima de pedido TCDC (MVKE.AUMNG, CL11 / canal 84), en UMB.
@@ -937,12 +931,6 @@ LEFT JOIN devolucion_posicion AS dv
   AND dv.POSNR = p.Posicion
 LEFT JOIN pivot_clasificacion AS cl
   ON cl.material = p.Material
-LEFT JOIN descripciones_sku AS d2
-  ON d2.caracteristica = 'RG_FAMILIA'    AND d2.codigo = cl.cod_nivel_2
-LEFT JOIN descripciones_sku AS d3
-  ON d3.caracteristica = 'RG_SUBFAMILIA' AND d3.codigo = cl.cod_nivel_3
-LEFT JOIN descripciones_sku AS d4
-  ON d4.caracteristica = 'RG_MARCA'      AND d4.codigo = cl.cod_nivel_4
 LEFT JOIN descripciones_sku AS d6
   ON d6.caracteristica = 'RG_NIVELRG'    AND d6.codigo = cl.cod_nivel_6
 LEFT JOIN `aecorsoft.cdc_produccion_pp_cp50_01_new.marc` AS marc
