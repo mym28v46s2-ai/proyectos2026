@@ -77,7 +77,7 @@ updated: 2026-09-28
 | `kna1` | `sap_sd` | `KUNNR`, `NAME1`, `REGIO`, `MCOD2`, `SORTL` | Maestro de clientes. `MCOD2`/`SORTL` (conceptos de búsqueda) agregados en `Ventas_Nac` para el destinatario `WE` (2026-10-14), no verificados con `INFORMATION_SCHEMA` |
 | `tvgrt`/`tvtwt`/`tspat`/`tvlst` | `sap_sd` | texto + `SPRAS` | Tablas de texto: grupo vendedores / canal / sector / bloqueo de entrega |
 | `t005t` | `sap_sd` | `LAND1`, `SPRAS`, `LANDX` | Texto de país |
-| `mvke` | `sap_sd` | `MATNR`, `VKORG`, `VTWEG`, `AUMNG` | Datos de ventas del material por área de ventas (sin centro). `AUMNG` = cantidad mínima de pedido en UMB. Dataset confirmado por el usuario (2026-10-20), columnas no verificadas con `INFORMATION_SCHEMA`. Usado en `stock_familias` (CL11 / canal 84) |
+| `mvke` | `sap_sd` | `MATNR`, `VKORG`, `VTWEG`, `AUMNG` | Datos de ventas del material por área de ventas (sin centro). `AUMNG` = cantidad mínima de pedido en UMB. Dataset confirmado por el usuario (2026-10-20), columnas no verificadas con `INFORMATION_SCHEMA`. Usado en `stock_familias` y `Ventas_Nac` (CL11 / canal 84) |
 | `vfkp` | `sap_sd` | `FKNUM`, `FKPOS`, `FKPTY`, `EBELN`, `EBELP`, `LBLNI`, `TDLNR`, `NETWR`, `WAERS`, `STBER`/`STABR`/`STFRE` | Posiciones de gastos de transporte (`FKPTY='ZE18'`=consolidador) |
 
 ### 2.3 Compras / MM (orden de servicio)
@@ -101,7 +101,7 @@ updated: 2026-09-28
 | Tabla | Dataset | Uso |
 |---|---|---|
 | `zconfol` | `sap_fi` | Folio fiscal (Chile: `NFOLIO`; México: `UUID`/timbrado). Ver sección 4 |
-| `ZRC_MM_REPORTE_MATERIALES` | `sap_mm` | Reporte Z de maestro de materiales con clasificación ya traducida: `N1`..`N5` (texto). `N2`/`N3`/`N4` = descripción de `RG_FAMILIA`/`RG_SUBFAMILIA`/`RG_MARCA` de Gescorp; `N1` y `N5` no existen en Gescorp (ej. `N1`='Solución Productos Terceros', `N5`='Tapacanto PVC Blanco'). Trae además `MAKTX`, `MTART`, `LVORM`, dimensiones, `M3`, `IDNRK`/`OJTXP`, `V1`..`V7` y datos de empaque. ~9,9 M filas / 342.693 materiales (~29 filas repetidas por material); ~5% (16.976) con N2/N3 distintos entre filas. `MARA.MATNR` trae ceros a la izquierda → cruzar con `LTRIM(TRIM(MATNR),'0')` en ambos lados. Cobertura Z903: 4.052/12.577 en total, 990/991 con stock logístico (diagnósticos 2026-10-20). Usado en `stock_familias` |
+| `ZRC_MM_REPORTE_MATERIALES` | `sap_mm` | Reporte Z de maestro de materiales con clasificación ya traducida: `N1`..`N5` (texto). `N2`/`N3`/`N4` = descripción de `RG_FAMILIA`/`RG_SUBFAMILIA`/`RG_MARCA` de Gescorp; `N1` y `N5` no existen en Gescorp (ej. `N1`='Solución Productos Terceros', `N5`='Tapacanto PVC Blanco'). Trae además `MAKTX`, `MTART`, `LVORM`, dimensiones, `M3`, `IDNRK`/`OJTXP`, `V1`..`V7` y datos de empaque. ~9,9 M filas / 342.693 materiales (~29 filas repetidas por material); ~5% (16.976) con N2/N3 distintos entre filas. `MARA.MATNR` trae ceros a la izquierda → cruzar con `LTRIM(TRIM(MATNR),'0')` en ambos lados. Cobertura Z903: 4.052/12.577 en total, 990/991 con stock logístico (diagnósticos 2026-10-20). Usado en `stock_familias` y `Ventas_Nac` (`Nivel_2`..`Nivel_5`) |
 | `ZCL_SD_DUS1` | `sap_sd` | Reporte Z ventas↔transporte, 1 fila = posición dentro de un `TKNUM` |
 | `zsd_t_export` | `sap_sd` (nombre no confirmado al 100%) | Reporte Z ventas↔producción, incluye posiciones sin transporte asignado |
 
@@ -343,7 +343,7 @@ Looker Studio / Tableau o por otros scripts del repo:
 | `log_fillrate_etapa5` | Efecto del repaqueteo sobre fill rate | Excel exportado (fuente SAP no reconstruida aún) | análisis Python | `log_fillrate_etapa5/CLAUDE.md` |
 | `prov_inventarios` | Provisión de deterioro (Daños/Obsoletos) vs. stock real por lote | `mchb`/`mcha`/`mch1`, `ckmlhd`/`ckmlcr` | `Procesos_CDS.prov_inventarios_monitor_dano/obsoletos` | `prov_inventarios/CLAUDE.md` |
 | `ventas_cl` | Detalle de ventas + ciclo completo (vigencia, crédito, despacho, factura, NC/devolución) | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbfa`/`vbrk`, `lips`, `mard` | `consulta_ventas_zpn_cl11.sql` | `ventas_cl/CLAUDE.md` |
-| `Ventas_Nac` | Detalle de ventas nacionales ZPN/CL11: ciclo completo (vigencia, crédito, despacho, factura, NC/devolución), cumplimiento por posición y cabecera, demanda abierta y posicionamiento de stock por zona logística | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbkd`/`vbfa`/`vbrk`, `likp`/`lips`, `mard`/`marc`/`marm`/`mara` | `Ventas_Nac/ventas_nac.sql` | — (sin `CLAUDE.md` propio) |
+| `Ventas_Nac` | Detalle de ventas nacionales ZPN/CL11: ciclo completo (vigencia, crédito, despacho, factura, NC/devolución), cumplimiento por posición y cabecera, demanda abierta y posicionamiento de stock por zona logística | `vbak`/`vbap`/`vbep`/`vbuk`/`vbpa`/`vbkd`/`vbfa`/`vbrk`, `likp`/`lips`, `mard`/`marc`/`marm`/`mara`, `mvke`, `ZRC_MM_REPORTE_MATERIALES` | `Ventas_Nac/ventas_nac.sql` | — (sin `CLAUDE.md` propio) |
 | `ventas_stocks_ventas` | Stock por Material×Ubicación para Tableau (sin demanda) | `mara`/`mard`/`marc`/`marm` | `stock_ventas.sql` | `ventas_stocks_ventas/CLAUDE.md` |
 | `gv_rechazos_cl` | Facturas rechazadas por cliente (folio fiscal, transporte) | `vbrp`/`vbrk`/`vbak`/`vbpa`, `vttp`/`vttk`, `zconfol` | `monitor_rechazos.sql` | `gv_rechazos_cl/CLAUDE.md` |
 | `control_embarques` | Control de embarques + "potencial de transporte marítimo" | `ZCL_SD_DUS1`, `zsd_t_export` | placeholder | `control_embarques/CLAUDE.md` |
