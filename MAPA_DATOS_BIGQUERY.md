@@ -25,7 +25,7 @@ updated: 2026-09-28
 |---|---|---|
 | `cdc_produccion_pp_cp50_01_new` | Maestro de materiales y stock: `mara`, `makt`, `marc`, `marm`, `mard`, `mcha`, `mseg_full`, `mkpf`, `cabn`, `ausp`, `cawn`, `cawnt`. También `mchb` (asumida, aún sin confirmar) | El nombre "cp50_01" no es intuitivo — es el dataset "grande" de datos de producción/materiales |
 | `sap_sd` | Ventas y distribución: `vbak`, `vbap`, `vbep`, `vbuk`, `vbpa`, `vbkd`, `vbfa`, `vbrk`, `vbrp`, `kna1`, `likp`, `lips`(⚠ ver abajo), `vttk`, `vttp`, `tvgrt`, `tvtwt`, `tspat`, `tvlst`, `t005t`, `vfkp`, `mvke`, `ZCL_SD_DUS1` (custom), `zsd_t_export` (custom, nombre no confirmado al 100%) | Dataset más usado en todo el repo |
-| `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
+| `sap_mm` | Gestión de materiales: `mch1`, `mbew`, `t001k`, `lfa1`, `ekko`, `ekpo`, `ekbe`, `ZRC_MM_REPORTE_MATERIALES` (custom), y **`lips`** (⚠ SD por naturaleza, pero vive aquí, no en `sap_sd`) | Ver advertencia de "un dataset = un módulo" más abajo |
 | `sap_co` | Controlling: `ckmlhd` (poblada), `ckmlcr` (**confirmada en esquema, vacía en datos — gap de replicación**) | Bloquea cualquier valorización Material Ledger hasta que se resuelva |
 | `sap_fi` | Finanzas / custom: `zconfol` (tabla custom de folio fiscal, NO estándar SAP) | Multi-país (Chile + México mezclados, ver sección 4) |
 | `Comercial` | Tablas comerciales ya preparadas (no réplicas SAP crudas): `Tabla_Pedidos_Exportacion` (1 fila por posición de pedido de venta de exportación; columnas usadas: `Documento_de_ventas`, `Posicion_Ped_Venta`, `Credito`, `Ctd_Ped_m3`, `Vol_Producir_M3`, `Estado_Pos` (`PEND`/`CUMP`/`SOBR`), `Booking` (solo agendamiento de nave), `Salmer` (`S`=salida de mercancía contabilizada / `N`), `Fecha_Embarque_Comprometida`, `Nombre_de_Nave` (`'Camion'`=envío terrestre, sin `Booking`), `Inic_pl_transporte`) | Visto en `comercial_exportaciones` (2026-10-01). Esquema completo no verificado con `INFORMATION_SCHEMA` |
@@ -101,6 +101,7 @@ updated: 2026-09-28
 | Tabla | Dataset | Uso |
 |---|---|---|
 | `zconfol` | `sap_fi` | Folio fiscal (Chile: `NFOLIO`; México: `UUID`/timbrado). Ver sección 4 |
+| `ZRC_MM_REPORTE_MATERIALES` | `sap_mm` | Reporte Z de maestro de materiales con clasificación ya traducida: `N1`..`N5` (texto). `N2`/`N3`/`N4` = descripción de `RG_FAMILIA`/`RG_SUBFAMILIA`/`RG_MARCA` de Gescorp; `N1` y `N5` no existen en Gescorp (ej. `N1`='Solución Productos Terceros', `N5`='Tapacanto PVC Blanco'). Trae además `MAKTX`, `MTART`, `LVORM`, dimensiones, `M3`, `IDNRK`/`OJTXP`, `V1`..`V7` y datos de empaque. ~9,9 M filas / 342.693 materiales (~29 filas repetidas por material); ~5% (16.976) con N2/N3 distintos entre filas. `MARA.MATNR` trae ceros a la izquierda → cruzar con `LTRIM(TRIM(MATNR),'0')` en ambos lados. Cobertura Z903: 4.052/12.577 en total, 990/991 con stock logístico (diagnósticos 2026-10-20). Usado en `stock_familias` |
 | `ZCL_SD_DUS1` | `sap_sd` | Reporte Z ventas↔transporte, 1 fila = posición dentro de un `TKNUM` |
 | `zsd_t_export` | `sap_sd` (nombre no confirmado al 100%) | Reporte Z ventas↔producción, incluye posiciones sin transporte asignado |
 
