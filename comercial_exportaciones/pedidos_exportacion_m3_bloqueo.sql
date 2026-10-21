@@ -81,7 +81,8 @@
 -- Cumplimiento de la planificación logística (por posición):
 --   El transporte marítimo (VTTK.SHTYP = 'ZCL1', clase de expedición
 --   VTTK.VSART = '32') debe crearse dentro de la ventana
---   [Fecha_Embarque_Comprometida - 10 días, Fecha_Embarque_Comprometida].
+--   [Fecha_embarque_minus_10_dias, Fecha_Embarque_Comprometida] (ambas
+--   columnas de Tabla_Pedidos_Exportacion: mínima y máxima).
 --   Fecha_Creacion_Transporte = VTTK.ERDAT del primer transporte ZCL1/32 de
 --   la posición (pedido -> entrega VBFA 'J' -> VTTP -> VTTK).
 --   Dias_Desvio_Planificacion:
@@ -90,7 +91,8 @@
 --     > 0  días después de la fecha comprometida (retraso). Si aún no hay
 --          transporte y la fecha comprometida ya pasó, días de atraso a hoy.
 --   Cumplimiento_Planificacion:
---     No aplica (rechazado / camión / bloqueo crédito), Sin fecha comprometida,
+--     No aplica (rechazado / camión / bloqueo crédito), Sin fecha comprometida
+--     (falta alguna de las dos fechas de la ventana),
 --     Sin programar, Sin programar con retraso, Programado anticipado,
 --     Programado a tiempo, Programado con retraso.
 --
@@ -131,6 +133,10 @@ pedidos AS (
       SAFE_CAST(t.Fecha_Embarque_Comprometida AS DATE),
       SAFE.PARSE_DATE('%Y%m%d', CAST(t.Fecha_Embarque_Comprometida AS STRING))
     )                                                              AS fecha_comprometida_norm,
+    COALESCE(
+      SAFE_CAST(t.Fecha_embarque_minus_10_dias AS DATE),
+      SAFE.PARSE_DATE('%Y%m%d', CAST(t.Fecha_embarque_minus_10_dias AS STRING))
+    )                                                              AS fecha_ventana_min_norm,
     COALESCE(UPPER(TRIM(CAST(t.Nombre_de_Nave AS STRING))) = 'CAMION', FALSE) AS es_camion
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
   -- Acepta DATE/DATETIME/TIMESTAMP, texto 'YYYY-MM-DD' o texto SAP 'YYYYMMDD'
@@ -250,7 +256,7 @@ detalle_posicion AS (
     p.* EXCEPT (posnr_join, es_bloqueo_credito,
                estado_pos_norm, salmer_norm, tiene_booking,
                ctd_ped_m3_norm, vol_producir_m3_norm,
-               fecha_comprometida_norm, es_camion),
+               fecha_comprometida_norm, fecha_ventana_min_norm, es_camion),
     ROUND(IF(p.es_bloqueo_credito, pm.qty_m3, p.Ctd_Ped_m3), 3) AS Cta_ped_m3_b,
     CASE
       WHEN NOT p.es_bloqueo_credito  THEN 'ORIGINAL'
@@ -273,21 +279,22 @@ detalle_posicion AS (
         AND p.ctd_ped_m3_norm <= p.vol_producir_m3_norm      THEN 'Recibido'
       ELSE 'Sin estado'
     END                                                        AS estado_posicion,
-    -- Planificación logística: transporte ZCL1/32 vs ventana [comprometida-10, comprometida]
+    -- Planificación logística: transporte ZCL1/32 vs ventana
+    -- [Fecha_embarque_minus_10_dias, Fecha_Embarque_Comprometida]
     tr.tknum                                                   AS Transporte_Planificacion,
     tr.fecha_creacion_transporte                               AS Fecha_Creacion_Transporte,
-    DATE_SUB(p.fecha_comprometida_norm, INTERVAL 10 DAY)       AS Inicio_Ventana_Planificacion,
     CASE
       WHEN (r.motivo_rechazo IS NOT NULL AND NOT p.es_bloqueo_credito)
         OR p.es_camion OR p.es_bloqueo_credito
-        OR p.fecha_comprometida_norm IS NULL                   THEN NULL
+        OR p.fecha_comprometida_norm IS NULL
+        OR p.fecha_ventana_min_norm IS NULL                    THEN NULL
       WHEN tr.fecha_creacion_transporte IS NULL
         AND CURRENT_DATE('America/Santiago') > p.fecha_comprometida_norm
         THEN DATE_DIFF(CURRENT_DATE('America/Santiago'), p.fecha_comprometida_norm, DAY)
       WHEN tr.fecha_creacion_transporte IS NULL                THEN NULL
-      WHEN tr.fecha_creacion_transporte < DATE_SUB(p.fecha_comprometida_norm, INTERVAL 10 DAY)
+      WHEN tr.fecha_creacion_transporte < p.fecha_ventana_min_norm
         THEN DATE_DIFF(tr.fecha_creacion_transporte,
-                       DATE_SUB(p.fecha_comprometida_norm, INTERVAL 10 DAY), DAY)
+                       p.fecha_ventana_min_norm, DAY)
       WHEN tr.fecha_creacion_transporte > p.fecha_comprometida_norm
         THEN DATE_DIFF(tr.fecha_creacion_transporte, p.fecha_comprometida_norm, DAY)
       ELSE 0
@@ -297,12 +304,13 @@ detalle_posicion AS (
         AND NOT p.es_bloqueo_credito                           THEN 'No aplica (rechazado)'
       WHEN p.es_camion                                         THEN 'No aplica (camión)'
       WHEN p.es_bloqueo_credito                                THEN 'No aplica (bloqueo crédito)'
-      WHEN p.fecha_comprometida_norm IS NULL                   THEN 'Sin fecha comprometida'
+      WHEN p.fecha_comprometida_norm IS NULL
+        OR p.fecha_ventana_min_norm IS NULL                    THEN 'Sin fecha comprometida'
       WHEN tr.fecha_creacion_transporte IS NULL
         AND CURRENT_DATE('America/Santiago') > p.fecha_comprometida_norm
                                                                THEN 'Sin programar con retraso'
       WHEN tr.fecha_creacion_transporte IS NULL                THEN 'Sin programar'
-      WHEN tr.fecha_creacion_transporte < DATE_SUB(p.fecha_comprometida_norm, INTERVAL 10 DAY)
+      WHEN tr.fecha_creacion_transporte < p.fecha_ventana_min_norm
                                                                THEN 'Programado anticipado'
       WHEN tr.fecha_creacion_transporte > p.fecha_comprometida_norm
                                                                THEN 'Programado con retraso'
