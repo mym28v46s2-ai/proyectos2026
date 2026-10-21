@@ -71,7 +71,7 @@ updated: 2026-09-28
 | `vbfa` | `sap_sd` | `VBELV`, `VBELN`, `POSNN`, `VBTYP_N` | Flujo de documentos — el campo clave para casi todo el repo. Ver dominio de `VBTYP_N` en sección 3.1 |
 | `likp` | `sap_sd` | `VBELN`, `WADAT_IST` | Cabecera de entrega — fecha real de salida de mercancía. **Ver advertencia de confiabilidad en 3.1** |
 | `lips` | `sap_mm` (⚠) | `VBELN`, `POSNR`, `LFIMG` | Posición de entrega — cantidad despachada |
-| `vttk`/`vttp` | `sap_sd` | `TKNUM`, `VBELN` | Cabecera/posición de transporte — vincula entrega↔transporte |
+| `vttk`/`vttp` | `sap_sd` | `TKNUM`, `VBELN`, `SHTYP`, `SIGNI` | Cabecera/posición de transporte — vincula entrega↔transporte. Exportación marítima: `SHTYP='ZCL1'` (tipo Z, puesto de planificación `TPLST='ZCLE'`) y el **booking de la naviera va en `VTTK.SIGNI`** (es el `Booking` de `Comercial.Tabla_Pedidos_Exportacion`). Confirmado con 1 pedido (`1100169049` → transporte `0013044116`, 2026-10-21); falta validar con más pedidos y con envíos por camión |
 | `vbrk` | `sap_sd` | `VBELN`, `FKDAT`, `FKART`, `XBLNR` | Cabecera de factura |
 | `vbrp` | `sap_sd` | `VBELN`, `AUBEL`, `VGBEL` | Posición de factura — `AUBEL`=pedido de origen, `VGBEL`=documento anterior inmediato |
 | `kna1` | `sap_sd` | `KUNNR`, `NAME1`, `REGIO`, `MCOD2`, `SORTL` | Maestro de clientes. `MCOD2`/`SORTL` (conceptos de búsqueda) agregados en `Ventas_Nac` para el destinatario `WE` (2026-10-14), no verificados con `INFORMATION_SCHEMA` |
