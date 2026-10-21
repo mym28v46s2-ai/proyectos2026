@@ -78,6 +78,24 @@
 -- pct_m3_enviado_pedido: m3 Enviado / m3 de posiciones válidas (sobre
 --   Cta_ped_m3_b, fracción 0-1 para formato % en Looker).
 --
+-- Cumplimiento de la planificación logística (por posición):
+--   El transporte marítimo (VTTK.SHTYP = 'ZCL1', clase de expedición
+--   VTTK.VSART = '32') debe crearse dentro de la ventana
+--   [Fecha_embarque_minus_10_dias, Fecha_Embarque_Comprometida] (ambas
+--   columnas de Tabla_Pedidos_Exportacion: mínima y máxima).
+--   Fecha_Creacion_Transporte = VTTK.ERDAT del primer transporte ZCL1/32 de
+--   la posición (pedido -> entrega VBFA 'J' -> VTTP -> VTTK).
+--   Dias_Desvio_Planificacion:
+--     < 0  días antes del inicio de la ventana (anticipado)
+--     = 0  dentro de la ventana
+--     > 0  días después de la fecha comprometida (retraso). Si aún no hay
+--          transporte y la fecha comprometida ya pasó, días de atraso a hoy.
+--   Cumplimiento_Planificacion:
+--     No aplica (rechazado / camión / bloqueo crédito), Sin fecha comprometida
+--     (falta alguna de las dos fechas de la ventana),
+--     Sin programar, Sin programar con retraso, Programado anticipado,
+--     Programado a tiempo, Programado con retraso.
+--
 -- Motivo_Rechazo_VBAP: código crudo de VBAP.ABGRU (TVAG/TVAGT no están
 -- replicadas, sin descripción; ver sección 2.6 del mapa).
 -- Los volúmenes se comparan redondeados a 3 decimales para evitar diferencias
@@ -110,7 +128,16 @@ pedidos AS (
       NULLIF(TRIM(CAST(t.Booking AS STRING)), ''),
       CONCAT('SIN_BOOKING|', COALESCE(TRIM(CAST(t.Nombre_de_Nave AS STRING)), ''),
              '|', COALESCE(CAST(t.Inic_pl_transporte AS STRING), ''))
-    )                                                              AS envio_key
+    )                                                              AS envio_key,
+    COALESCE(
+      SAFE_CAST(t.Fecha_Embarque_Comprometida AS DATE),
+      SAFE.PARSE_DATE('%Y%m%d', CAST(t.Fecha_Embarque_Comprometida AS STRING))
+    )                                                              AS fecha_comprometida_norm,
+    COALESCE(
+      SAFE_CAST(t.Fecha_embarque_minus_10_dias AS DATE),
+      SAFE.PARSE_DATE('%Y%m%d', CAST(t.Fecha_embarque_minus_10_dias AS STRING))
+    )                                                              AS fecha_ventana_min_norm,
+    COALESCE(UPPER(TRIM(CAST(t.Nombre_de_Nave AS STRING))) = 'CAMION', FALSE) AS es_camion
   FROM `aecorsoft.Comercial.Tabla_Pedidos_Exportacion` AS t
   -- Acepta DATE/DATETIME/TIMESTAMP, texto 'YYYY-MM-DD' o texto SAP 'YYYYMMDD'
   WHERE COALESCE(
@@ -124,6 +151,27 @@ pedidos_bloqueados AS (
   SELECT DISTINCT vbeln_join AS vbeln
   FROM pedidos
   WHERE es_bloqueo_credito
+),
+
+-- Primer transporte marítimo (ZCL1, clase de expedición 32) de cada posición:
+-- pedido -> entrega (VBFA 'J') -> VTTP -> VTTK
+transporte_posicion AS (
+  SELECT
+    LPAD(CAST(f.VBELV AS STRING), 10, '0')  AS vbeln,
+    LPAD(CAST(f.POSNV AS STRING),  6, '0')  AS posnr,
+    MIN(COALESCE(SAFE_CAST(k.ERDAT AS DATE),
+                 SAFE.PARSE_DATE('%Y%m%d', CAST(k.ERDAT AS STRING))))   AS fecha_creacion_transporte,
+    ARRAY_AGG(k.TKNUM ORDER BY CAST(k.ERDAT AS STRING), k.TKNUM LIMIT 1)[OFFSET(0)] AS tknum
+  FROM `aecorsoft.sap_sd.vbfa` AS f
+  JOIN `aecorsoft.sap_sd.vttp` AS tp
+    ON LPAD(CAST(tp.VBELN AS STRING), 10, '0') = LPAD(CAST(f.VBELN AS STRING), 10, '0')
+  JOIN `aecorsoft.sap_sd.vttk` AS k
+    ON k.TKNUM = tp.TKNUM
+  WHERE f.VBTYP_N = 'J'
+    AND TRIM(CAST(k.SHTYP AS STRING)) = 'ZCL1'
+    AND TRIM(CAST(k.VSART AS STRING)) = '32'
+    AND LPAD(CAST(f.VBELV AS STRING), 10, '0') IN (SELECT DISTINCT vbeln_join FROM pedidos)
+  GROUP BY 1, 2
 ),
 
 -- Posiciones rechazadas en SAP (VBAP.ABGRU), para todos los pedidos del período
@@ -207,7 +255,8 @@ detalle_posicion AS (
   SELECT
     p.* EXCEPT (posnr_join, es_bloqueo_credito,
                estado_pos_norm, salmer_norm, tiene_booking,
-               ctd_ped_m3_norm, vol_producir_m3_norm),
+               ctd_ped_m3_norm, vol_producir_m3_norm,
+               fecha_comprometida_norm, fecha_ventana_min_norm, es_camion),
     ROUND(IF(p.es_bloqueo_credito, pm.qty_m3, p.Ctd_Ped_m3), 3) AS Cta_ped_m3_b,
     CASE
       WHEN NOT p.es_bloqueo_credito  THEN 'ORIGINAL'
@@ -229,7 +278,44 @@ detalle_posicion AS (
       WHEN p.estado_pos_norm = 'PEND'
         AND p.ctd_ped_m3_norm <= p.vol_producir_m3_norm      THEN 'Recibido'
       ELSE 'Sin estado'
-    END                                                        AS estado_posicion
+    END                                                        AS estado_posicion,
+    -- Planificación logística: transporte ZCL1/32 vs ventana
+    -- [Fecha_embarque_minus_10_dias, Fecha_Embarque_Comprometida]
+    tr.tknum                                                   AS Transporte_Planificacion,
+    tr.fecha_creacion_transporte                               AS Fecha_Creacion_Transporte,
+    CASE
+      WHEN (r.motivo_rechazo IS NOT NULL AND NOT p.es_bloqueo_credito)
+        OR p.es_camion OR p.es_bloqueo_credito
+        OR p.fecha_comprometida_norm IS NULL
+        OR p.fecha_ventana_min_norm IS NULL                    THEN NULL
+      WHEN tr.fecha_creacion_transporte IS NULL
+        AND CURRENT_DATE('America/Santiago') > p.fecha_comprometida_norm
+        THEN DATE_DIFF(CURRENT_DATE('America/Santiago'), p.fecha_comprometida_norm, DAY)
+      WHEN tr.fecha_creacion_transporte IS NULL                THEN NULL
+      WHEN tr.fecha_creacion_transporte < p.fecha_ventana_min_norm
+        THEN DATE_DIFF(tr.fecha_creacion_transporte,
+                       p.fecha_ventana_min_norm, DAY)
+      WHEN tr.fecha_creacion_transporte > p.fecha_comprometida_norm
+        THEN DATE_DIFF(tr.fecha_creacion_transporte, p.fecha_comprometida_norm, DAY)
+      ELSE 0
+    END                                                        AS Dias_Desvio_Planificacion,
+    CASE
+      WHEN r.motivo_rechazo IS NOT NULL
+        AND NOT p.es_bloqueo_credito                           THEN 'No aplica (rechazado)'
+      WHEN p.es_camion                                         THEN 'No aplica (camión)'
+      WHEN p.es_bloqueo_credito                                THEN 'No aplica (bloqueo crédito)'
+      WHEN p.fecha_comprometida_norm IS NULL
+        OR p.fecha_ventana_min_norm IS NULL                    THEN 'Sin fecha comprometida'
+      WHEN tr.fecha_creacion_transporte IS NULL
+        AND CURRENT_DATE('America/Santiago') > p.fecha_comprometida_norm
+                                                               THEN 'Sin programar con retraso'
+      WHEN tr.fecha_creacion_transporte IS NULL                THEN 'Sin programar'
+      WHEN tr.fecha_creacion_transporte < p.fecha_ventana_min_norm
+                                                               THEN 'Programado anticipado'
+      WHEN tr.fecha_creacion_transporte > p.fecha_comprometida_norm
+                                                               THEN 'Programado con retraso'
+      ELSE 'Programado a tiempo'
+    END                                                        AS Cumplimiento_Planificacion
   FROM pedidos AS p
   LEFT JOIN posiciones_m3 AS pm
     ON  pm.vbeln = p.vbeln_join
@@ -238,6 +324,9 @@ detalle_posicion AS (
   LEFT JOIN posiciones_rechazadas AS r
     ON  r.vbeln = p.vbeln_join
     AND r.posnr = p.posnr_join
+  LEFT JOIN transporte_posicion AS tr
+    ON  tr.vbeln = p.vbeln_join
+    AND tr.posnr = p.posnr_join
 ),
 
 resumen_pedido AS (
